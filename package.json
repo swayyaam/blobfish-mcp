@@ -7,11 +7,18 @@
   "bin": {
     "blobfish": "./server.js"
   },
+  "files": [
+    "server.js",
+    "setup.js",
+    ".env.example"
+  ],
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "setup": "node setup.js"
   },
   "dependencies": {
     "@apidevtools/swagger-parser": "^10.1.0",
-    "@modelcontextprotocol/sdk": "^1.0.0"
+    "@modelcontextprotocol/sdk": "^1.0.0",
+    "dotenv": "^16.0.0"
   }
 }

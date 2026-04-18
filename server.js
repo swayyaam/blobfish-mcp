@@ -1,4 +1,6 @@
 #!/usr/bin/env node
+import { config } from 'dotenv';
+config();
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
@@ -334,8 +336,8 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
   }
 });
 
-if (process.argv[2]) {
-  await loadSpec(process.argv[2]);
+for (const url of process.argv.slice(2)) {
+  await loadSpec(url);
 }
 
 console.error(`[Blobfish] Ready — ${META_TOOLS.length} meta-tools${loadedApis.size ? `, ${getAllTools().length} API tools` : ''}`);
