@@ -1,0 +1,17 @@
+{
+  "name": "blobfish",
+  "version": "1.0.0",
+  "description": "Any OpenAPI spec. Zero config. Claude-ready.",
+  "type": "module",
+  "main": "server.js",
+  "bin": {
+    "blobfish": "./server.js"
+  },
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "@apidevtools/swagger-parser": "^10.1.0",
+    "@modelcontextprotocol/sdk": "^1.0.0"
+  }
+}
