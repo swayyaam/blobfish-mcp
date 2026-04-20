@@ -1,7 +1,7 @@
 {
-  "name": "blobfish",
+  "name": "blobfish-mcp",
   "version": "1.0.0",
-  "description": "Any OpenAPI spec. Zero config. Claude-ready.",
+  "description": "Any OpenAPI spec. Zero config. Claude-ready. MCP server that turns any REST API into Claude-callable tools instantly.",
   "type": "module",
   "main": "server.js",
   "bin": {
@@ -10,11 +10,39 @@
   "files": [
     "server.js",
     "setup.js",
-    ".env.example"
+    ".env.example",
+    "blobfish.example.json"
   ],
   "scripts": {
     "start": "node server.js",
     "setup": "node setup.js"
+  },
+  "keywords": [
+    "mcp",
+    "openapi",
+    "swagger",
+    "claude",
+    "ai",
+    "llm",
+    "api",
+    "tools",
+    "anthropic",
+    "model-context-protocol",
+    "postman",
+    "rest"
+  ],
+  "author": "Swayam Mishra",
+  "license": "MIT",
+  "homepage": "https://github.com/swayam-mishra/blobfish-mcp#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/swayam-mishra/blobfish-mcp.git"
+  },
+  "bugs": {
+    "url": "https://github.com/swayam-mishra/blobfish-mcp/issues"
+  },
+  "engines": {
+    "node": ">=18.0.0"
   },
   "dependencies": {
     "@apidevtools/swagger-parser": "^10.1.0",
