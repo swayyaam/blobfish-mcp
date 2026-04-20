@@ -197,21 +197,11 @@ Responses are generated from the `example` fields in the OpenAPI spec.
 
 ## Pre-launch checklist
 
-Things that must be done before this goes public:
+See [todo.md](todo.md) for the full detailed to-do list.
 
-### Must-have
-- [ ] **Demo GIF** — Record a 30-second screen capture: Claude Desktop → load PetStore → call an endpoint. Drop it in the `Demo` section above.
-- [ ] **API Registry** — A `registry/` folder with pre-configured `.json` files for popular APIs (Stripe, GitHub, Notion, Linear, Slack, OpenAI). Users load them with one command instead of hunting for spec URLs.
-- [ ] **Troubleshooting section** — Document the 3 most common issues: wrong config path, Node not in PATH, spec URL not reachable.
-- [ ] **Understand the codebase** — Don't ship something you can't explain. Read `study.md` end to end.
-
-### Nice to have
-- [ ] **Tests** — At least a few integration tests that load a spec and verify tools are generated correctly.
-- [ ] **`rate_limit_status` tool** — Show current rate limit state per API (remaining calls, reset time).
-- [ ] **Workflow templates** — A `workflows/` folder with example multi-step workflows people can copy.
-
-### Distribution (after npm traction)
-- [ ] Submit to Anthropic's MCP marketplace directory
-- [ ] Post on Hacker News (Show HN)
-- [ ] Post in MCP Discord server
-- [ ] Web dashboard (local UI for loaded APIs + live request log)
+### Must-have before going public
+- [ ] Selective tool loading (`include_tags` filter for mega-APIs like GitHub/Stripe)
+- [ ] `set_api_auth` tool (inject credentials mid-conversation without restarting)
+- [ ] Demo GIF
+- [ ] API Registry (`registry/` folder with pre-configured popular APIs)
+- [ ] Understand the codebase (`study.md`)
