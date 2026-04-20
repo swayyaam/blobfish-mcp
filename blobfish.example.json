@@ -1,0 +1,30 @@
+{
+  "apis": [
+    {
+      "url": "https://petstore.swagger.io/v2/swagger.json",
+      "name": "petstore"
+    },
+    {
+      "url": "https://api.example.com/openapi.json",
+      "name": "myapi",
+      "auth": {
+        "type": "bearer",
+        "key": "your-token-here"
+      }
+    },
+    {
+      "url": "https://api.example.com/openapi.json",
+      "name": "myapi_apikey",
+      "auth": {
+        "type": "apikey",
+        "key": "your-api-key",
+        "header": "X-Api-Key"
+      }
+    },
+    {
+      "url": "./local-spec.json",
+      "name": "localapi",
+      "mock": true
+    }
+  ]
+}
