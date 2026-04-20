@@ -11,17 +11,19 @@ import { fileURLToPath } from 'url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-// name → { specUrl, title, description, version, tags, tools, handlers, auth, mock, baseUrl, testEndpoint }
 const loadedApis = new Map();
 
+const DEFAULT_TIMEOUT = parseInt(process.env.BLOBFISH_TIMEOUT || '30000');
+const DEFAULT_RETRIES = parseInt(process.env.BLOBFISH_RETRIES || '3');
+const LOG_PATH = process.env.BLOBFISH_LOG
+  ? (process.env.BLOBFISH_LOG === 'true' ? path.join(__dirname, 'blobfish.log') : process.env.BLOBFISH_LOG)
+  : null;
+
 const SPEC_PROBE_PATHS = [
-  '/openapi.json', '/openapi.yaml',
-  '/swagger.json', '/swagger.yaml',
-  '/api/openapi.json', '/api/swagger.json',
-  '/api-docs', '/api-docs/swagger.json',
+  '/openapi.json', '/openapi.yaml', '/swagger.json', '/swagger.yaml',
+  '/api/openapi.json', '/api/swagger.json', '/api-docs', '/api-docs/swagger.json',
   '/v1/openapi.json', '/v2/openapi.json', '/v3/openapi.json',
-  '/api/v1/openapi.json', '/api/v2/openapi.json',
-  '/public/openapi.json', '/docs/openapi.json',
+  '/api/v1/openapi.json', '/api/v2/openapi.json', '/public/openapi.json', '/docs/openapi.json',
 ];
 
 const AUTH_SCHEMA = {
@@ -39,7 +41,7 @@ const AUTH_SCHEMA = {
 const META_TOOLS = [
   {
     name: 'discover_api',
-    description: 'Auto-find and load an API from just a domain — no spec URL needed. Probes common OpenAPI/Swagger paths and loads the first one found.',
+    description: 'Auto-find and load an API from just a domain — no spec URL needed. Probes common OpenAPI/Swagger paths.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -47,13 +49,14 @@ const META_TOOLS = [
         name: { type: 'string', description: 'Optional name prefix for tools' },
         auth: AUTH_SCHEMA,
         mock: { type: 'boolean', description: 'Return example responses instead of real HTTP calls' },
+        timeout: { type: 'integer', description: 'Request timeout in ms (default: 30000)' },
       },
       required: ['base_url'],
     },
   },
   {
     name: 'load_api',
-    description: 'Load any OpenAPI/Swagger spec or Postman collection — by URL or local file path. All endpoints become callable tools instantly.',
+    description: 'Load any OpenAPI/Swagger spec or Postman collection — by URL or local file path.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -61,40 +64,49 @@ const META_TOOLS = [
         name: { type: 'string', description: 'Optional name prefix for tools' },
         auth: AUTH_SCHEMA,
         mock: { type: 'boolean', description: 'Return example responses instead of real HTTP calls' },
+        timeout: { type: 'integer', description: 'Request timeout in ms (default: 30000)' },
+        retries: { type: 'integer', description: 'Retry attempts on failure (default: 3)' },
       },
       required: ['spec_url'],
     },
   },
   {
-    name: 'test_connection',
-    description: 'Test if a loaded API is reachable by hitting its first available GET endpoint. Returns status and response time.',
+    name: 'fetch_all',
+    description: 'Fetch all pages of a paginated endpoint automatically. Handles Link headers, cursor, offset, and page-based pagination.',
     inputSchema: {
       type: 'object',
       properties: {
-        name: { type: 'string', description: 'API name to test (from list_apis)' },
-      },
-      required: ['name'],
-    },
-  },
-  {
-    name: 'inspect_tool',
-    description: 'Show the full schema of any loaded tool — its description and all input parameters.',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        tool_name: { type: 'string', description: 'Exact tool name to inspect' },
+        tool_name: { type: 'string', description: 'The tool to paginate (from a loaded API)' },
+        args: { type: 'object', description: 'Arguments to pass to the tool', default: {} },
+        max_pages: { type: 'integer', description: 'Maximum pages to fetch (default: 10)', default: 10 },
       },
       required: ['tool_name'],
     },
   },
   {
-    name: 'api_summary',
-    description: 'Plain-English overview of a loaded API — purpose, capability groups, and endpoint count by category.',
+    name: 'test_connection',
+    description: 'Test if a loaded API is reachable. Returns status code and response time.',
     inputSchema: {
       type: 'object',
-      properties: {
-        name: { type: 'string', description: 'API name (from list_apis)' },
-      },
+      properties: { name: { type: 'string', description: 'API name to test (from list_apis)' } },
+      required: ['name'],
+    },
+  },
+  {
+    name: 'inspect_tool',
+    description: 'Show the full schema of any loaded tool — description and all input parameters.',
+    inputSchema: {
+      type: 'object',
+      properties: { tool_name: { type: 'string', description: 'Exact tool name to inspect' } },
+      required: ['tool_name'],
+    },
+  },
+  {
+    name: 'api_summary',
+    description: 'Plain-English overview of a loaded API — purpose, capability groups, endpoint count.',
+    inputSchema: {
+      type: 'object',
+      properties: { name: { type: 'string', description: 'API name (from list_apis)' } },
       required: ['name'],
     },
   },
@@ -108,15 +120,45 @@ const META_TOOLS = [
     description: 'Remove a loaded API and all its tools.',
     inputSchema: {
       type: 'object',
-      properties: {
-        name: { type: 'string', description: 'API name to unload (from list_apis)' },
-      },
+      properties: { name: { type: 'string', description: 'API name to unload' } },
       required: ['name'],
     },
   },
 ];
 
-// ── Helpers ──────────────────────────────────────────────────────────────────
+// ── Utilities ─────────────────────────────────────────────────────────────────
+
+const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+
+function interpolateEnv(val) {
+  if (typeof val !== 'string') return val;
+  return val.replace(/\$\{([^}]+)\}/g, (_, name) => process.env[name] ?? '');
+}
+
+function interpolateObj(obj) {
+  if (!obj || typeof obj !== 'object') return obj;
+  const result = {};
+  for (const [k, v] of Object.entries(obj)) result[k] = typeof v === 'object' ? interpolateObj(v) : interpolateEnv(v);
+  return result;
+}
+
+function logRequest(entry) {
+  if (!LOG_PATH) return;
+  fs.appendFileSync(LOG_PATH, JSON.stringify({ ts: new Date().toISOString(), ...entry }) + '\n');
+}
+
+async function withRetry(fn, retries = DEFAULT_RETRIES, delay = 1000) {
+  for (let i = 0; i <= retries; i++) {
+    try {
+      const result = await fn();
+      if (result.status >= 500 && i < retries) { await sleep(delay * 2 ** i); continue; }
+      return result;
+    } catch (err) {
+      if (i === retries) throw err;
+      await sleep(delay * 2 ** i);
+    }
+  }
+}
 
 function slugify(str) {
   return (str || 'api').toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '').slice(0, 20) || 'api';
@@ -151,10 +193,7 @@ function buildInputSchema(operation, sharedParams = []) {
 
 function getBaseUrl(api) {
   if (api.servers?.[0]?.url) return api.servers[0].url.replace(/\/$/, '');
-  if (api.host) {
-    const scheme = api.schemes?.[0] || 'https';
-    return `${scheme}://${api.host}${api.basePath || ''}`.replace(/\/$/, '');
-  }
+  if (api.host) return `${api.schemes?.[0] || 'https'}://${api.host}${api.basePath || ''}`.replace(/\/$/, '');
   return '';
 }
 
@@ -166,15 +205,9 @@ function buildAuthHeaders(auth) {
     return headers;
   }
   switch (auth.type) {
-    case 'bearer':
-      if (auth.key) headers['Authorization'] = `Bearer ${auth.key}`;
-      break;
-    case 'apikey':
-      if (auth.key) headers[auth.header || 'X-Api-Key'] = auth.key;
-      break;
-    case 'basic':
-      if (auth.username) headers['Authorization'] = `Basic ${Buffer.from(`${auth.username}:${auth.password || ''}`).toString('base64')}`;
-      break;
+    case 'bearer': if (auth.key) headers['Authorization'] = `Bearer ${auth.key}`; break;
+    case 'apikey': if (auth.key) headers[auth.header || 'X-Api-Key'] = auth.key; break;
+    case 'basic': if (auth.username) headers['Authorization'] = `Basic ${Buffer.from(`${auth.username}:${auth.password || ''}`).toString('base64')}`; break;
   }
   return headers;
 }
@@ -188,11 +221,7 @@ function generateMockFromSchema(schema, depth = 0) {
     case 'integer': case 'number': return 0;
     case 'boolean': return false;
     case 'array': return schema.items ? [generateMockFromSchema(schema.items, depth + 1)] : [];
-    case 'object': {
-      const obj = {};
-      for (const [k, v] of Object.entries(schema.properties || {})) obj[k] = generateMockFromSchema(v, depth + 1);
-      return obj;
-    }
+    case 'object': { const obj = {}; for (const [k, v] of Object.entries(schema.properties || {})) obj[k] = generateMockFromSchema(v, depth + 1); return obj; }
     default: return 'example';
   }
 }
@@ -208,6 +237,47 @@ function getMockResponse(operation) {
     return { message: resp.description || 'OK' };
   }
   return { mock: true };
+}
+
+// ── Pagination helpers ────────────────────────────────────────────────────────
+
+function findDataArray(data) {
+  if (Array.isArray(data)) return data;
+  if (!data || typeof data !== 'object') return null;
+  for (const val of Object.values(data)) {
+    if (Array.isArray(val) && val.length > 0) return val;
+  }
+  return null;
+}
+
+function detectNextPage(data, headers, currentArgs) {
+  // Link header: <url>; rel="next"
+  const link = headers?.link || headers?.Link || '';
+  const linkMatch = link.match(/<([^>]+)>;\s*rel="next"/);
+  if (linkMatch) return { type: 'url', url: linkMatch[1] };
+
+  if (!data || typeof data !== 'object') return null;
+
+  // Cursor/token fields
+  const meta = data.meta || data.pagination || data.paging || data;
+  for (const field of ['next', 'next_url', 'next_cursor', 'cursor', 'next_page_token', 'after', 'continuation_token']) {
+    const val = meta[field];
+    if (val && typeof val === 'string') return { type: 'cursor', field, value: val };
+  }
+
+  // has_more + offset/limit
+  if (data.has_more === true) {
+    const limit = currentArgs.limit ?? currentArgs.per_page ?? currentArgs.page_size ?? 20;
+    return { type: 'offset', offset: (currentArgs.offset ?? 0) + limit, limit };
+  }
+
+  // total + offset (explicit)
+  if (typeof data.total === 'number' && typeof data.offset === 'number' && typeof data.limit === 'number') {
+    const nextOffset = data.offset + data.limit;
+    if (nextOffset < data.total) return { type: 'offset', offset: nextOffset, limit: data.limit };
+  }
+
+  return null;
 }
 
 // ── Probe ─────────────────────────────────────────────────────────────────────
@@ -232,7 +302,7 @@ async function probeSpecUrl(baseUrl) {
 
 // ── HTTP execution ────────────────────────────────────────────────────────────
 
-async function executeRequest(baseUrl, method, pathTemplate, operation, args, auth) {
+async function executeRequest(baseUrl, method, pathTemplate, operation, args, auth, timeout = DEFAULT_TIMEOUT) {
   let url = baseUrl + pathTemplate;
   const headers = buildAuthHeaders(auth);
   const queryParams = new URLSearchParams();
@@ -245,29 +315,29 @@ async function executeRequest(baseUrl, method, pathTemplate, operation, args, au
   }
   const qs = queryParams.toString();
   if (qs) url += `?${qs}`;
-  const init = { method: method.toUpperCase(), headers };
-  if (args.body !== undefined) {
-    headers['Content-Type'] = 'application/json';
-    init.body = JSON.stringify(args.body);
-  }
+  const init = { method: method.toUpperCase(), headers, signal: AbortSignal.timeout(timeout) };
+  if (args.body !== undefined) { headers['Content-Type'] = 'application/json'; init.body = JSON.stringify(args.body); }
+
+  const t0 = Date.now();
   const res = await fetch(url, init);
+  const ms = Date.now() - t0;
   const text = await res.text();
-  let data;
-  try { data = JSON.parse(text); } catch { data = text; }
-  return { status: res.status, ok: res.ok, data };
+  let data; try { data = JSON.parse(text); } catch { data = text; }
+  const resHeaders = {};
+  for (const [k, v] of res.headers.entries()) resHeaders[k.toLowerCase()] = v;
+  logRequest({ method: method.toUpperCase(), url, status: res.status, ms });
+  return { status: res.status, ok: res.ok, data, headers: resHeaders };
 }
 
 // ── Load OpenAPI/Swagger ──────────────────────────────────────────────────────
 
-async function loadSpec(specUrl, nameHint, auth, mock = false) {
+async function loadSpec(specUrl, nameHint, auth, mock = false, timeout = DEFAULT_TIMEOUT, retries = DEFAULT_RETRIES) {
   const isLocal = !specUrl.startsWith('http://') && !specUrl.startsWith('https://');
   const resolved = isLocal ? path.resolve(specUrl) : specUrl;
   const api = await SwaggerParser.dereference(resolved);
   const name = slugify(nameHint || api.info?.title);
   const baseUrl = getBaseUrl(api);
-  const tools = [];
-  const handlers = new Map();
-  const tagMap = {};
+  const tools = [], handlers = new Map(), tagMap = {};
   let testEndpoint = null;
 
   for (const tag of (api.tags || [])) tagMap[tag.name] = { description: tag.description || '', count: 0 };
@@ -281,20 +351,15 @@ async function loadSpec(specUrl, nameHint, auth, mock = false) {
       const schema = buildInputSchema(op, sharedParams);
       tools.push({ name: toolName, description: op.summary || op.description || `${method.toUpperCase()} ${p}`, inputSchema: schema });
       handlers.set(toolName, mock
-        ? () => ({ status: 200, ok: true, mock: true, data: getMockResponse(op) })
-        : (args) => executeRequest(baseUrl, method, p, op, args, auth)
+        ? () => ({ status: 200, ok: true, mock: true, data: getMockResponse(op), headers: {} })
+        : (args) => withRetry(() => executeRequest(baseUrl, method, p, op, args, auth, timeout), retries)
       );
-      if (method === 'get' && !testEndpoint && (schema.required || []).length === 0) {
-        testEndpoint = { method, path: p, operation: op };
-      }
-      for (const tag of (op.tags || ['(untagged)'])) {
-        if (!tagMap[tag]) tagMap[tag] = { description: '', count: 0 };
-        tagMap[tag].count++;
-      }
+      if (method === 'get' && !testEndpoint && (schema.required || []).length === 0) testEndpoint = { method, path: p, operation: op };
+      for (const tag of (op.tags || ['(untagged)'])) { if (!tagMap[tag]) tagMap[tag] = { description: '', count: 0 }; tagMap[tag].count++; }
     }
   }
 
-  loadedApis.set(name, { specUrl: resolved, title: api.info?.title || name, description: api.info?.description || '', version: api.info?.version || '', tags: tagMap, tools, handlers, auth, mock, baseUrl, testEndpoint });
+  loadedApis.set(name, { specUrl: resolved, title: api.info?.title || name, description: api.info?.description || '', version: api.info?.version || '', tags: tagMap, tools, handlers, auth, mock, baseUrl, testEndpoint, timeout, retries });
   console.error(`[Blobfish] Loaded "${api.info?.title}" as "${name}" — ${tools.length} tools${mock ? ' [mock]' : ''}`);
   return { name, count: tools.length, title: api.info?.title };
 }
@@ -310,13 +375,12 @@ function flattenPostmanItems(items) {
   return out;
 }
 
-async function loadPostman(source, nameHint, auth, mock = false) {
+async function loadPostman(source, nameHint, auth, mock = false, timeout = DEFAULT_TIMEOUT, retries = DEFAULT_RETRIES) {
   const isLocal = !source.startsWith('http');
   const raw = isLocal ? fs.readFileSync(path.resolve(source), 'utf8') : await fetch(source).then(r => r.text());
   const collection = JSON.parse(raw);
   const name = slugify(nameHint || collection.info?.name);
-  const tools = [];
-  const handlers = new Map();
+  const tools = [], handlers = new Map();
 
   for (const item of flattenPostmanItems(collection.item || [])) {
     const req = item.request;
@@ -324,24 +388,15 @@ async function loadPostman(source, nameHint, auth, mock = false) {
     const rawUrl = typeof req.url === 'string' ? req.url : (req.url?.raw || '');
     const urlVars = typeof req.url === 'object' ? (req.url.variable || []) : [];
     const queryItems = typeof req.url === 'object' ? (req.url.query || []) : [];
-
     const toolName = `${name}_${method}_${item.name.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '')}`.slice(0, 64);
-    const properties = {};
-    const required = [];
-
-    for (const v of urlVars) {
-      properties[v.key] = { type: 'string', description: v.description || `Path variable: ${v.key}` };
-      required.push(v.key);
-    }
-    for (const q of queryItems) {
-      if (!q.disabled) properties[q.key] = { type: 'string', description: q.description || q.key };
-    }
+    const properties = {}, required = [];
+    for (const v of urlVars) { properties[v.key] = { type: 'string', description: v.description || `Path variable: ${v.key}` }; required.push(v.key); }
+    for (const q of queryItems) { if (!q.disabled) properties[q.key] = { type: 'string', description: q.description || q.key }; }
     if (req.body?.raw) properties.body = { type: 'object', description: 'Request body' };
-
     tools.push({ name: toolName, description: item.name, inputSchema: { type: 'object', properties, ...(required.length ? { required } : {}) } });
 
     handlers.set(toolName, async (args) => {
-      if (mock) return { status: 200, ok: true, mock: true, data: { message: 'Mock response' } };
+      if (mock) return { status: 200, ok: true, mock: true, data: { message: 'Mock response' }, headers: {} };
       let url = rawUrl;
       for (const [k, v] of Object.entries(args)) url = url.replace(new RegExp(`\\{\\{${k}\\}\\}`, 'g'), encodeURIComponent(String(v)));
       const qp = new URLSearchParams();
@@ -350,77 +405,111 @@ async function loadPostman(source, nameHint, auth, mock = false) {
       if (qs) url += (url.includes('?') ? '&' : '?') + qs;
       const headers = buildAuthHeaders(auth);
       for (const h of (req.header || [])) { if (!h.disabled) headers[h.key] = h.value; }
-      const init = { method: method.toUpperCase(), headers };
+      const init = { method: method.toUpperCase(), headers, signal: AbortSignal.timeout(timeout) };
       if (args.body) { headers['Content-Type'] = 'application/json'; init.body = JSON.stringify(args.body); }
       else if (req.body?.raw && method !== 'get') { headers['Content-Type'] = 'application/json'; init.body = req.body.raw; }
+      const t0 = Date.now();
       const res = await fetch(url, init);
+      const ms = Date.now() - t0;
       const text = await res.text();
       let data; try { data = JSON.parse(text); } catch { data = text; }
-      return { status: res.status, ok: res.ok, data };
+      const resHeaders = {};
+      for (const [k, v] of res.headers.entries()) resHeaders[k.toLowerCase()] = v;
+      logRequest({ method: method.toUpperCase(), url, status: res.status, ms });
+      return { status: res.status, ok: res.ok, data, headers: resHeaders };
     });
   }
 
-  loadedApis.set(name, { specUrl: source, title: collection.info?.name || name, description: '', version: '', tags: {}, tools, handlers, auth, mock, baseUrl: '', testEndpoint: null, isPostman: true });
+  loadedApis.set(name, { specUrl: source, title: collection.info?.name || name, description: '', version: '', tags: {}, tools, handlers, auth, mock, baseUrl: '', testEndpoint: null, isPostman: true, timeout, retries });
   console.error(`[Blobfish] Loaded Postman collection "${collection.info?.name}" as "${name}" — ${tools.length} tools`);
   return { name, count: tools.length, title: collection.info?.name };
 }
 
 // ── Auto-detect format ────────────────────────────────────────────────────────
 
-async function autoLoad(source, nameHint, auth, mock) {
+async function autoLoad(source, nameHint, auth, mock, timeout, retries) {
   const isLocal = !source.startsWith('http://') && !source.startsWith('https://');
   if (isLocal) {
     const parsed = JSON.parse(fs.readFileSync(path.resolve(source), 'utf8'));
-    if (parsed.info?._postman_id || (typeof parsed.info?.schema === 'string' && parsed.info.schema.includes('postman'))) {
-      return loadPostman(source, nameHint, auth, mock);
-    }
-    return loadSpec(source, nameHint, auth, mock);
+    if (parsed.info?._postman_id || (typeof parsed.info?.schema === 'string' && parsed.info.schema.includes('postman')))
+      return loadPostman(source, nameHint, auth, mock, timeout, retries);
+    return loadSpec(source, nameHint, auth, mock, timeout, retries);
   }
   try {
     const text = await fetch(source, { signal: AbortSignal.timeout(5000) }).then(r => r.text());
     const parsed = JSON.parse(text);
-    if (parsed.info?._postman_id || (typeof parsed.info?.schema === 'string' && parsed.info.schema.includes('postman'))) {
-      return loadPostman(source, nameHint, auth, mock);
-    }
-  } catch { /* fall through to loadSpec */ }
-  return loadSpec(source, nameHint, auth, mock);
+    if (parsed.info?._postman_id || (typeof parsed.info?.schema === 'string' && parsed.info.schema.includes('postman')))
+      return loadPostman(source, nameHint, auth, mock, timeout, retries);
+  } catch { /* fall through */ }
+  return loadSpec(source, nameHint, auth, mock, timeout, retries);
 }
 
 // ── Server ────────────────────────────────────────────────────────────────────
 
 function getAllTools() { return [...loadedApis.values()].flatMap(a => a.tools); }
+function findHandler(n) { for (const { handlers } of loadedApis.values()) { if (handlers.has(n)) return handlers.get(n); } return null; }
+function findTool(n) { for (const { tools } of loadedApis.values()) { const t = tools.find(t => t.name === n); if (t) return t; } return null; }
 
-function findHandler(toolName) {
-  for (const { handlers } of loadedApis.values()) { if (handlers.has(toolName)) return handlers.get(toolName); }
-  return null;
-}
-
-function findTool(toolName) {
-  for (const { tools } of loadedApis.values()) { const t = tools.find(t => t.name === toolName); if (t) return t; }
-  return null;
-}
-
-const server = new Server({ name: 'blobfish', version: '4.0.0' }, { capabilities: { tools: {} } });
-
+const server = new Server({ name: 'blobfish', version: '5.0.0' }, { capabilities: { tools: {} } });
 server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: [...META_TOOLS, ...getAllTools()] }));
 
 server.setRequestHandler(CallToolRequestSchema, async (req) => {
   const { name, arguments: args = {} } = req.params;
   try {
+
     if (name === 'discover_api') {
-      const { base_url, name: nameHint, auth, mock } = args;
+      const { base_url, name: nameHint, auth, mock, timeout } = args;
       const specUrl = await probeSpecUrl(base_url);
       if (!specUrl) return { content: [{ type: 'text', text: `Could not find an OpenAPI spec at ${base_url}. Tried ${SPEC_PROBE_PATHS.length} paths. Try load_api with a direct URL.` }], isError: true };
-      const result = await loadSpec(specUrl, nameHint, auth, mock);
+      const result = await loadSpec(specUrl, nameHint, auth, mock, timeout);
       await server.sendToolListChanged();
-      return { content: [{ type: 'text', text: `Discovered spec at ${specUrl}\nLoaded "${result.title}" as "${result.name}" — ${result.count} tools.\nUse api_summary("${result.name}") for details.` }] };
+      return { content: [{ type: 'text', text: `Discovered: ${specUrl}\nLoaded "${result.title}" as "${result.name}" — ${result.count} tools.\nUse api_summary("${result.name}") for details.` }] };
     }
 
     if (name === 'load_api') {
-      const { spec_url, name: nameHint, auth, mock } = args;
-      const result = await autoLoad(spec_url, nameHint, auth, mock);
+      const { spec_url, name: nameHint, auth, mock, timeout, retries } = args;
+      const result = await autoLoad(spec_url, nameHint, auth, mock, timeout, retries);
       await server.sendToolListChanged();
       return { content: [{ type: 'text', text: `Loaded "${result.title}" as "${result.name}" — ${result.count} tools.\nUse api_summary("${result.name}") for details.` }] };
+    }
+
+    if (name === 'fetch_all') {
+      const { tool_name, args: toolArgs = {}, max_pages = 10 } = args;
+      const handler = findHandler(tool_name);
+      if (!handler) return { content: [{ type: 'text', text: `Tool "${tool_name}" not found.` }], isError: true };
+
+      const allItems = [];
+      let currentArgs = { ...toolArgs };
+      let nextUrl = null;
+      let pages = 0;
+
+      while (pages < max_pages) {
+        let response;
+        if (nextUrl) {
+          const res = await fetch(nextUrl, { signal: AbortSignal.timeout(DEFAULT_TIMEOUT) });
+          const text = await res.text();
+          let data; try { data = JSON.parse(text); } catch { data = text; }
+          const resHeaders = {};
+          for (const [k, v] of res.headers.entries()) resHeaders[k.toLowerCase()] = v;
+          response = { status: res.status, ok: res.ok, data, headers: resHeaders };
+        } else {
+          response = await handler(currentArgs);
+        }
+
+        if (!response.ok) break;
+        pages++;
+        const items = findDataArray(response.data);
+        if (items) allItems.push(...items);
+        else if (pages === 1) { allItems.push(response.data); break; }
+
+        const next = detectNextPage(response.data, response.headers || {}, currentArgs);
+        if (!next) break;
+        if (next.type === 'url') { nextUrl = next.url; }
+        else if (next.type === 'cursor') { nextUrl = null; currentArgs = { ...currentArgs, [next.field]: next.value }; }
+        else if (next.type === 'offset') { nextUrl = null; currentArgs = { ...currentArgs, offset: next.offset }; }
+      }
+
+      return { content: [{ type: 'text', text: JSON.stringify({ pages_fetched: pages, total_items: allItems.length, data: allItems }, null, 2) }] };
     }
 
     if (name === 'test_connection') {
@@ -430,23 +519,20 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
       if (api.mock) return { content: [{ type: 'text', text: `"${apiName}" is in mock mode — no real connections.` }] };
       if (!api.testEndpoint) return { content: [{ type: 'text', text: `No simple GET endpoint found in "${apiName}" for testing.` }] };
       const { method, path: p, operation } = api.testEndpoint;
-      const start = Date.now();
-      const result = await executeRequest(api.baseUrl, method, p, operation, {}, api.auth);
-      const ms = Date.now() - start;
-      return { content: [{ type: 'text', text: `${apiName} — ${result.ok ? '✓ reachable' : '✗ error'}\nStatus: ${result.status} | Response time: ${ms}ms\nEndpoint: ${method.toUpperCase()} ${p}` }] };
+      const t0 = Date.now();
+      const result = await executeRequest(api.baseUrl, method, p, operation, {}, api.auth, api.timeout);
+      return { content: [{ type: 'text', text: `${apiName} — ${result.ok ? '✓ reachable' : '✗ error'}\nStatus: ${result.status} | ${Date.now() - t0}ms\nEndpoint: ${method.toUpperCase()} ${p}` }] };
     }
 
     if (name === 'inspect_tool') {
-      const { tool_name } = args;
-      const tool = findTool(tool_name);
-      if (!tool) return { content: [{ type: 'text', text: `Tool "${tool_name}" not found.` }], isError: true };
+      const tool = findTool(args.tool_name);
+      if (!tool) return { content: [{ type: 'text', text: `Tool "${args.tool_name}" not found.` }], isError: true };
       return { content: [{ type: 'text', text: JSON.stringify(tool, null, 2) }] };
     }
 
     if (name === 'api_summary') {
-      const { name: apiName } = args;
-      const api = loadedApis.get(apiName);
-      if (!api) return { content: [{ type: 'text', text: `No API named "${apiName}".` }], isError: true };
+      const api = loadedApis.get(args.name);
+      if (!api) return { content: [{ type: 'text', text: `No API named "${args.name}".` }], isError: true };
       const tagLines = Object.entries(api.tags).sort((a, b) => b[1].count - a[1].count).map(([tag, { description, count }]) => `  • ${tag} (${count} endpoint${count !== 1 ? 's' : ''})${description ? ` — ${description}` : ''}`);
       const summary = [`${api.title} v${api.version}${api.mock ? ' [mock]' : ''}${api.isPostman ? ' [Postman]' : ''}`, api.description ? `\n${api.description}` : '', `\n${api.tools.length} endpoints${tagLines.length ? `:\n${tagLines.join('\n')}` : ''}`, `\nSpec: ${api.specUrl}`].join('');
       return { content: [{ type: 'text', text: summary }] };
@@ -459,11 +545,10 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
     }
 
     if (name === 'unload_api') {
-      const { name: apiName } = args;
-      if (!loadedApis.has(apiName)) return { content: [{ type: 'text', text: `No API named "${apiName}".` }], isError: true };
-      loadedApis.delete(apiName);
+      if (!loadedApis.has(args.name)) return { content: [{ type: 'text', text: `No API named "${args.name}".` }], isError: true };
+      loadedApis.delete(args.name);
       await server.sendToolListChanged();
-      return { content: [{ type: 'text', text: `Unloaded "${apiName}".` }] };
+      return { content: [{ type: 'text', text: `Unloaded "${args.name}".` }] };
     }
 
     const handler = findHandler(name);
@@ -478,15 +563,18 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
 
 // ── Startup ───────────────────────────────────────────────────────────────────
 
-const blobfishConfig = path.join(__dirname, 'blobfish.json');
-if (fs.existsSync(blobfishConfig)) {
-  const { apis = [] } = JSON.parse(fs.readFileSync(blobfishConfig, 'utf8'));
-  for (const entry of apis) await autoLoad(entry.url, entry.name, entry.auth, entry.mock || false);
+const blobfishConfigPath = path.join(__dirname, 'blobfish.json');
+if (fs.existsSync(blobfishConfigPath)) {
+  const cfg = JSON.parse(fs.readFileSync(blobfishConfigPath, 'utf8'));
+  for (const entry of (cfg.apis || [])) {
+    const auth = interpolateObj(entry.auth);
+    await autoLoad(entry.url, entry.name, auth, entry.mock || false, entry.timeout ?? cfg.timeout, entry.retries ?? cfg.retries);
+  }
 }
 
 for (const url of process.argv.slice(2)) await loadSpec(url);
 
-console.error(`[Blobfish] Ready — ${META_TOOLS.length} meta-tools${loadedApis.size ? `, ${getAllTools().length} API tools` : ''}`);
+console.error(`[Blobfish] Ready — ${META_TOOLS.length} meta-tools${loadedApis.size ? `, ${getAllTools().length} API tools` : ''}${LOG_PATH ? ` | logging → ${LOG_PATH}` : ''}`);
 
 const transport = new StdioServerTransport();
 await server.connect(transport);
