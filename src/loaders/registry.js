@@ -31,6 +31,24 @@ export function listRegistryEntries() {
     .filter(Boolean);
 }
 
+// #3: After interpolating registry auth, check if any ${VAR} remain unresolved.
+// Throws a Claude-readable error with exact instructions on how to fix it.
+export function checkUnresolvedAuth(auth, apiName) {
+  if (!auth) return;
+  for (const val of Object.values(auth)) {
+    if (typeof val !== 'string') continue;
+    const match = val.match(/\$\{([^}]+)\}/);
+    if (match) {
+      const varName = match[1];
+      throw new Error(
+        `"${apiName}" requires the ${varName} environment variable which is not set.\n\n` +
+        `To fix this: ask the user to provide their API key, then call:\n` +
+        `set_api_auth("${apiName}", { "type": "${auth.type || 'bearer'}", "key": "<their key>" })`
+      );
+    }
+  }
+}
+
 // Returns true if str looks like a registry name (not a URL or file path)
 export function isRegistryName(str) {
   return !str.includes('://') && !str.includes('/') && !str.includes('\\') &&

@@ -11,7 +11,7 @@ import { executeRequest } from '../http.js';
 import { loadSpec } from '../loaders/openapi.js';
 import { autoLoad } from '../loaders/auto.js';
 import { probeSpecUrl } from '../loaders/probe.js';
-import { getRegistryEntry, listRegistryEntries, isRegistryName } from '../loaders/registry.js';
+import { getRegistryEntry, listRegistryEntries, isRegistryName, checkUnresolvedAuth } from '../loaders/registry.js';
 import { interpolateObj } from '../utils.js';
 import { DEFAULT_TIMEOUT, DEFAULT_RETRIES, MAX_LOG_ENTRIES, MAX_RESP_SIZE } from '../constants.js';
 import { META_TOOLS } from './meta.js';
@@ -46,7 +46,9 @@ export async function handleToolCall(req, { notifyToolsChanged }) {
         const entry = getRegistryEntry(spec_url);
         if (entry) {
           nameHint   = nameHint   ?? entry.name;
-          auth       = auth       ?? (entry.auth ? interpolateObj(entry.auth) : undefined);
+          const resolvedAuth = entry.auth ? interpolateObj(entry.auth) : undefined;
+          checkUnresolvedAuth(resolvedAuth, spec_url); // #3: self-healing auth check
+          auth       = auth       ?? resolvedAuth;
           include_tags = include_tags ?? entry.include_tags;
           exclude_tags = exclude_tags ?? entry.exclude_tags;
           shallow    = shallow    ?? entry.shallow;
