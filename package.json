@@ -13,6 +13,7 @@
     "src/",
     "registry/",
     "workflows/",
+    "assets/",
     "smithery.yaml",
     ".env.example",
     "blobfish.example.json"

@@ -16,7 +16,7 @@ Point it at an OpenAPI/Swagger URL or a Postman collection. Blobfish parses ever
 
 > *"I pointed it at a domain name. It found the spec itself, loaded 20 tools, and Claude was querying a live API in 10 seconds."*
 
-<!-- Add demo GIF here -->
+![Blobfish demo](https://raw.githubusercontent.com/swayam-mishra/blobfish-mcp/main/assets/demo.gif)
 
 ---
 
@@ -79,12 +79,13 @@ Works with any MCP-compatible client:
 
 ## How it works
 
-Blobfish starts with **14 meta-tools** Claude can always call:
+Blobfish starts with **15 meta-tools** Claude can always call:
 
 | Tool | Description |
 |------|-------------|
+| `list_registry` | List all pre-configured APIs — load any by name instantly |
 | `discover_api` | Auto-find a spec from just a domain — probes 15 common paths |
-| `load_api` | Load by URL or local file (OpenAPI, Swagger, or Postman). Supports `include_tags`, `shallow` |
+| `load_api` | Load by URL, registry name, or local file. Supports `include_tags`, `exclude_tags`, `shallow`, `mock` |
 | `set_api_auth` | Update credentials for a loaded API mid-conversation |
 | `fetch_all` | Auto-paginate any endpoint — Link headers, cursor, offset |
 | `run_workflow` | Multi-step pipelines with `{{ template }}` syntax, `foreach`, and `run_if` |
@@ -231,15 +232,3 @@ Responses are generated from the `example` fields in the OpenAPI spec.
 - Node.js 18+ native `fetch`
 - [dotenv](https://github.com/motdotla/dotenv)
 
----
-
-## Pre-launch checklist
-
-See [todo.md](todo.md) for the full detailed to-do list.
-
-### Must-have before going public
-- [x] Selective tool loading (`include_tags` / `exclude_tags`)
-- [x] `set_api_auth` tool
-- [ ] Demo GIF
-- [ ] API Registry (`registry/` folder with pre-configured popular APIs)
-- [ ] Understand the codebase (`study.md`)
