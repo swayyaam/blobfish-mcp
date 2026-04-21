@@ -5,6 +5,7 @@ import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
 import SwaggerParser from '@apidevtools/swagger-parser';
+import { promises as dns } from 'dns';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -13,18 +14,22 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 // ── Global state ──────────────────────────────────────────────────────────────
 
-const loadedApis    = new Map(); // apiName → api entry
-const toolMeta      = new Map(); // toolName → { method, apiName }
-const responseCache = new Map(); // cacheKey → { data, expiresAt }
-const rateLimitState = new Map(); // apiName → { blockedUntil }
-const savedWorkflows = new Map(); // name → { steps }
+const loadedApis     = new Map();
+const toolMeta       = new Map();
+const responseCache  = new Map();
+const rateLimitState = new Map();
+const savedWorkflows = new Map();
 let cacheHits = 0, cacheMisses = 0;
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
-const DEFAULT_TIMEOUT   = parseInt(process.env.BLOBFISH_TIMEOUT   ?? '30000');
-const DEFAULT_RETRIES   = parseInt(process.env.BLOBFISH_RETRIES   ?? '3');
-const DEFAULT_CACHE_TTL = parseInt(process.env.BLOBFISH_CACHE_TTL ?? '60');
+const DEFAULT_TIMEOUT    = parseInt(process.env.BLOBFISH_TIMEOUT   ?? '30000');
+const DEFAULT_RETRIES    = parseInt(process.env.BLOBFISH_RETRIES   ?? '3');
+const DEFAULT_CACHE_TTL  = parseInt(process.env.BLOBFISH_CACHE_TTL ?? '60');
+const ALLOW_LOCAL        = process.env.BLOBFISH_ALLOW_LOCAL === 'true';
+const MAX_SPEC_SIZE      = 10 * 1024 * 1024; // 10 MB
+const MAX_RESP_SIZE      =  5 * 1024 * 1024; // 5 MB
+const MAX_TOOLS_PER_SPEC = 500;
 const LOG_PATH = process.env.BLOBFISH_LOG
   ? (process.env.BLOBFISH_LOG === 'true' ? path.join(__dirname, 'blobfish.log') : process.env.BLOBFISH_LOG)
   : null;
@@ -35,6 +40,20 @@ const SPEC_PROBE_PATHS = [
   '/v1/openapi.json', '/v2/openapi.json', '/v3/openapi.json',
   '/api/v1/openapi.json', '/api/v2/openapi.json', '/public/openapi.json', '/docs/openapi.json',
 ];
+
+// SEC-1: Private IP ranges blocked by SSRF guard
+const PRIVATE_IP_RE = [
+  /^127\./, /^0\.0\.0\.0/, /^10\./,
+  /^172\.(1[6-9]|2\d|3[01])\./, /^192\.168\./,
+  /^169\.254\./,   // link-local / AWS+GCP+Azure metadata
+  /^::1$/, /^fc00:/i, /^fe80:/i,
+];
+
+// SEC-6: Query param names that may carry credentials
+const CRED_PARAMS = new Set([
+  'api_key', 'apikey', 'access_token', 'token', 'key', 'secret',
+  'password', 'client_secret', 'auth', 'authorization', 'bearer', 'private_key',
+]);
 
 const AUTH_SCHEMA = {
   type: 'object',
@@ -50,12 +69,42 @@ const META_TOOLS = [
   {
     name: 'discover_api',
     description: 'Auto-find and load an API from just a domain — no spec URL needed.',
-    inputSchema: { type: 'object', properties: { base_url: { type: 'string' }, name: { type: 'string' }, auth: AUTH_SCHEMA, mock: { type: 'boolean' }, timeout: { type: 'integer' } }, required: ['base_url'] },
+    inputSchema: {
+      type: 'object',
+      properties: {
+        base_url: { type: 'string' }, name: { type: 'string' }, auth: AUTH_SCHEMA,
+        mock: { type: 'boolean' }, timeout: { type: 'integer' },
+        include_tags: { type: 'array', items: { type: 'string' }, description: 'Only load endpoints with these tags' },
+        exclude_tags: { type: 'array', items: { type: 'string' }, description: 'Skip endpoints with these tags' },
+      },
+      required: ['base_url'],
+    },
   },
   {
     name: 'load_api',
     description: 'Load any OpenAPI/Swagger spec or Postman collection — by URL or local file path.',
-    inputSchema: { type: 'object', properties: { spec_url: { type: 'string' }, name: { type: 'string' }, auth: AUTH_SCHEMA, mock: { type: 'boolean' }, timeout: { type: 'integer' }, retries: { type: 'integer' } }, required: ['spec_url'] },
+    inputSchema: {
+      type: 'object',
+      properties: {
+        spec_url: { type: 'string' }, name: { type: 'string' }, auth: AUTH_SCHEMA,
+        mock: { type: 'boolean' }, timeout: { type: 'integer' }, retries: { type: 'integer' },
+        include_tags: { type: 'array', items: { type: 'string' }, description: 'Only load endpoints with these tags' },
+        exclude_tags: { type: 'array', items: { type: 'string' }, description: 'Skip endpoints with these tags' },
+      },
+      required: ['spec_url'],
+    },
+  },
+  {
+    name: 'set_api_auth',
+    description: '⚠️ Update auth for a loaded API at runtime. Warning: credentials you provide here are visible in this conversation. For production keys use .env or blobfish.json instead.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        name: { type: 'string', description: 'API name (from list_apis)' },
+        auth: AUTH_SCHEMA,
+      },
+      required: ['name', 'auth'],
+    },
   },
   {
     name: 'fetch_all',
@@ -70,19 +119,16 @@ const META_TOOLS = [
       properties: {
         steps: {
           type: 'array',
-          description: 'Steps to run in order',
           items: {
             type: 'object',
             properties: {
-              id: { type: 'string', description: 'Step identifier for referencing in later steps' },
-              tool: { type: 'string', description: 'Tool name to call' },
-              args: { type: 'object', description: 'Args — use {{ steps.stepId.data.field }} or {{ input.field }}' },
-              on_error: { type: 'string', enum: ['stop', 'continue'], default: 'stop' },
+              id: { type: 'string' }, tool: { type: 'string' },
+              args: { type: 'object' }, on_error: { type: 'string', enum: ['stop', 'continue'], default: 'stop' },
             },
             required: ['tool'],
           },
         },
-        input: { type: 'object', description: 'Initial data, referenced as {{ input.fieldName }}' },
+        input: { type: 'object' },
       },
       required: ['steps'],
     },
@@ -95,7 +141,7 @@ const META_TOOLS = [
   {
     name: 'clear_cache',
     description: 'Clear the response cache. Optionally clear only one API\'s cached entries.',
-    inputSchema: { type: 'object', properties: { api_name: { type: 'string', description: 'Clear only this API\'s cache (omit to clear all)' } } },
+    inputSchema: { type: 'object', properties: { api_name: { type: 'string' } } },
   },
   {
     name: 'test_connection',
@@ -124,6 +170,9 @@ const META_TOOLS = [
   },
 ];
 
+// SEC-7: Reserved names that dynamic tools cannot shadow
+const META_TOOL_NAMES = new Set(META_TOOLS.map(t => t.name));
+
 // ── Utilities ─────────────────────────────────────────────────────────────────
 
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
@@ -139,9 +188,79 @@ function interpolateObj(obj) {
   return out;
 }
 
+// SEC-6: Scrub credential query params from URLs before logging
+function scrubUrl(urlStr) {
+  try {
+    const u = new URL(urlStr);
+    for (const k of u.searchParams.keys()) {
+      if (CRED_PARAMS.has(k.toLowerCase())) u.searchParams.set(k, '[REDACTED]');
+    }
+    return u.toString();
+  } catch { return urlStr; }
+}
+
 function logRequest(entry) {
   if (!LOG_PATH) return;
-  fs.appendFileSync(LOG_PATH, JSON.stringify({ ts: new Date().toISOString(), ...entry }) + '\n');
+  fs.appendFileSync(LOG_PATH, JSON.stringify({ ts: new Date().toISOString(), ...entry, url: scrubUrl(entry.url) }) + '\n');
+}
+
+// SEC-2: Strip control chars and truncate external descriptions
+function sanitizeDesc(str, maxLen = 300) {
+  if (typeof str !== 'string') return str;
+  return str.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '').slice(0, maxLen);
+}
+
+// SEC-10: Strip file paths from error messages before returning to Claude
+function sanitizeError(err) {
+  let msg = err?.message || String(err);
+  msg = msg.replace(/[A-Za-z]:\\[^\s,;]*/g, '[path]');
+  msg = msg.replace(/\/[^\s,;]{3,}/g, '[path]');
+  return msg;
+}
+
+// SEC-1: Reject URLs pointing to private/internal networks
+async function assertSafeUrl(urlStr) {
+  if (ALLOW_LOCAL) return;
+  let hostname;
+  try { hostname = new URL(urlStr).hostname; }
+  catch { throw new Error(`Invalid URL: ${urlStr}`); }
+
+  if (/^(localhost|0\.0\.0\.0)$/i.test(hostname))
+    throw new Error(`SSRF blocked: ${hostname} is not allowed`);
+
+  if (PRIVATE_IP_RE.some(re => re.test(hostname)))
+    throw new Error(`SSRF blocked: ${hostname} is a private/internal address`);
+
+  // DNS resolution check — catches internal.corp.com → 10.x.x.x
+  try {
+    const records = await dns.lookup(hostname, { all: true });
+    for (const { address } of records) {
+      if (PRIVATE_IP_RE.some(re => re.test(address)))
+        throw new Error(`SSRF blocked: ${hostname} resolves to private IP ${address}`);
+    }
+  } catch (e) {
+    if (e.message.startsWith('SSRF')) throw e;
+    // DNS failure: let through to avoid blocking on transient issues
+  }
+}
+
+// SEC-3: Restrict local file access to allowed directory
+function assertSafeLocalPath(filePath) {
+  if (!ALLOW_LOCAL)
+    throw new Error('Local file access is disabled. Set BLOBFISH_ALLOW_LOCAL=true to enable.');
+  const resolved = path.resolve(filePath);
+  const allowedBase = path.resolve(process.env.BLOBFISH_LOCAL_DIR || __dirname);
+  if (resolved !== allowedBase && !resolved.startsWith(allowedBase + path.sep))
+    throw new Error(`Path traversal blocked: file is outside allowed directory`);
+  return resolved;
+}
+
+// SEC-7: Ensure dynamic tool names never shadow meta-tools
+function makeUniqueName(candidate) {
+  if (!META_TOOL_NAMES.has(candidate) && !findTool(candidate)) return candidate;
+  let i = 1;
+  while (META_TOOL_NAMES.has(`${candidate}_${i}`) || findTool(`${candidate}_${i}`)) i++;
+  return `${candidate}_${i}`;
 }
 
 function slugify(str) {
@@ -151,18 +270,20 @@ function toToolName(apiName, method, p) {
   const slug = p.replace(/^\//, '').replace(/[{}]/g, '').replace(/[^a-zA-Z0-9]+/g, '_').replace(/^_|_$/g, '');
   return slug ? `${apiName}_${method}_${slug}` : `${apiName}_${method}`;
 }
+
+// SEC-2: sanitizeDesc applied to all external descriptions
 function buildInputSchema(operation, sharedParams = []) {
   const properties = {}, required = [];
   const params = [...sharedParams, ...(operation.parameters || [])];
   for (const p of params) {
     if (!['path', 'query', 'header'].includes(p.in)) continue;
-    properties[p.name] = { type: p.schema?.type || p.type || 'string', description: p.description || `${p.in} parameter` };
+    properties[p.name] = { type: p.schema?.type || p.type || 'string', description: sanitizeDesc(p.description || `${p.in} parameter`) };
     if (p.required) required.push(p.name);
   }
   const jsonBody = operation.requestBody?.content?.['application/json']?.schema;
   if (jsonBody) { properties.body = { ...jsonBody, description: 'Request body (JSON)' }; if (operation.requestBody.required) required.push('body'); }
   const bodyParam = (operation.parameters || []).find(p => p.in === 'body');
-  if (bodyParam) { properties.body = { ...(bodyParam.schema || { type: 'object' }), description: bodyParam.description || 'Request body' }; if (bodyParam.required) required.push('body'); }
+  if (bodyParam) { properties.body = { ...(bodyParam.schema || { type: 'object' }), description: sanitizeDesc(bodyParam.description || 'Request body') }; if (bodyParam.required) required.push('body'); }
   return { type: 'object', properties, ...(required.length ? { required } : {}) };
 }
 function getBaseUrl(api) {
@@ -207,9 +328,12 @@ function getMockResponse(operation) {
 
 // ── Cache ─────────────────────────────────────────────────────────────────────
 
+// SEC-12: Wrap in try/catch to handle circular references
 function getCacheKey(toolName, args) {
-  const stable = JSON.stringify(args, Object.keys(args || {}).sort());
-  return `${toolName}:${stable}`;
+  try {
+    const stable = JSON.stringify(args, Object.keys(args || {}).sort());
+    return `${toolName}:${stable}`;
+  } catch { return `${toolName}:nocache`; }
 }
 function getCached(key) {
   const entry = responseCache.get(key);
@@ -289,22 +413,25 @@ function detectNextPage(data, headers, currentArgs) {
 async function probeSpecUrl(baseUrl) {
   if (!baseUrl.startsWith('http')) baseUrl = 'https://' + baseUrl;
   baseUrl = baseUrl.replace(/\/$/, '');
+  await assertSafeUrl(baseUrl); // SEC-1: SSRF check on base domain
   for (const p of SPEC_PROBE_PATHS) {
     try {
       const url = baseUrl + p;
       const res = await fetch(url, { signal: AbortSignal.timeout(3000) });
       if (!res.ok) continue;
       const text = await res.text();
+      if (text.length > MAX_SPEC_SIZE) continue; // SEC-4: skip oversized responses
       if (text.includes('"openapi"') || text.includes('"swagger"') || text.includes('openapi:') || text.includes('swagger:')) {
         console.error(`[Blobfish] Found spec at ${url}`); return url;
       }
-    } catch { continue; }
+    } catch (e) { if (e.message?.startsWith('SSRF')) throw e; continue; }
   }
   return null;
 }
 
 // ── HTTP execution ────────────────────────────────────────────────────────────
 
+// SEC-9: Retry-After is already capped at 60s via Math.min(waitMs, 60000)
 async function withRetry(fn, retries = DEFAULT_RETRIES, delay = 1000) {
   for (let i = 0; i <= retries; i++) {
     try {
@@ -312,7 +439,7 @@ async function withRetry(fn, retries = DEFAULT_RETRIES, delay = 1000) {
       if (result.status === 429 && i < retries) {
         const retryAfter = parseInt(result.headers?.['retry-after'] ?? '5');
         const waitMs = retryAfter > 1000 ? retryAfter : retryAfter * 1000;
-        console.error(`[Blobfish] 429 — waiting ${retryAfter}s before retry...`);
+        console.error(`[Blobfish] 429 — waiting ${Math.ceil(Math.min(waitMs, 60000) / 1000)}s before retry...`);
         await sleep(Math.min(waitMs, 60000)); continue;
       }
       if (result.status >= 500 && i < retries) { await sleep(delay * 2 ** i); continue; }
@@ -332,49 +459,81 @@ async function executeRequest(baseUrl, method, pathTemplate, operation, args, au
     else if (p.in === 'header') headers[p.name] = String(val);
   }
   const qs = queryParams.toString(); if (qs) url += `?${qs}`;
+  await assertSafeUrl(url); // SEC-1: SSRF check on final constructed URL
   const init = { method: method.toUpperCase(), headers, signal: AbortSignal.timeout(timeout) };
   if (args.body !== undefined) { headers['Content-Type'] = 'application/json'; init.body = JSON.stringify(args.body); }
   const t0 = Date.now();
   const res = await fetch(url, init);
   const ms = Date.now() - t0;
+  // SEC-4: Enforce response body size limit
+  const contentLength = parseInt(res.headers.get('content-length') || '0');
+  if (contentLength > MAX_RESP_SIZE) throw new Error(`Response too large (${(contentLength / 1024 / 1024).toFixed(1)}MB, max ${MAX_RESP_SIZE / 1024 / 1024}MB)`);
   const text = await res.text();
+  if (text.length > MAX_RESP_SIZE) throw new Error(`Response body too large`);
   let data; try { data = JSON.parse(text); } catch { data = text; }
   const resHeaders = {};
   for (const [k, v] of res.headers.entries()) resHeaders[k.toLowerCase()] = v;
-  logRequest({ method: method.toUpperCase(), url, status: res.status, ms });
+  logRequest({ method: method.toUpperCase(), url, status: res.status, ms }); // scrubUrl applied inside logRequest
   if (apiName) updateRateLimit(apiName, resHeaders);
   return { status: res.status, ok: res.ok, data, headers: resHeaders };
 }
 
 // ── Load OpenAPI/Swagger ──────────────────────────────────────────────────────
 
-async function loadSpec(specUrl, nameHint, auth, mock = false, timeout = DEFAULT_TIMEOUT, retries = DEFAULT_RETRIES) {
+async function loadSpec(specUrl, nameHint, auth, mock = false, timeout = DEFAULT_TIMEOUT, retries = DEFAULT_RETRIES, includeTags = null, excludeTags = null) {
   const isLocal = !specUrl.startsWith('http://') && !specUrl.startsWith('https://');
-  const resolved = isLocal ? path.resolve(specUrl) : specUrl;
+  let resolved;
+  if (isLocal) {
+    resolved = assertSafeLocalPath(specUrl); // SEC-3: path traversal check
+  } else {
+    await assertSafeUrl(specUrl); // SEC-1: SSRF check
+    resolved = specUrl;
+  }
+
   const api = await SwaggerParser.dereference(resolved);
   const name = slugify(nameHint || api.info?.title);
   const baseUrl = getBaseUrl(api);
   const tools = [], handlers = new Map(), tagMap = {};
   let testEndpoint = null;
-  for (const tag of (api.tags || [])) tagMap[tag.name] = { description: tag.description || '', count: 0 };
+
+  for (const tag of (api.tags || [])) tagMap[tag.name] = { description: sanitizeDesc(tag.description || ''), count: 0 };
+
   for (const [p, pathItem] of Object.entries(api.paths || {})) {
     const sharedParams = pathItem.parameters || [];
     for (const method of ['get', 'post', 'put', 'patch', 'delete']) {
       const op = pathItem[method]; if (!op) continue;
-      const toolName = toToolName(name, method, p);
+
+      // MUST-DO #1: Tag filtering
+      if (includeTags?.length && !op.tags?.some(t => includeTags.includes(t))) continue;
+      if (excludeTags?.length && op.tags?.some(t => excludeTags.includes(t))) continue;
+
+      // SEC-7: Prevent shadowing meta-tools
+      const toolName = makeUniqueName(toToolName(name, method, p));
       const schema = buildInputSchema(op, sharedParams);
-      tools.push({ name: toolName, description: op.summary || op.description || `${method.toUpperCase()} ${p}`, inputSchema: schema });
+
+      // SEC-2: Sanitize description from external spec
+      const desc = sanitizeDesc(op.summary || op.description || `${method.toUpperCase()} ${p}`);
+      tools.push({ name: toolName, description: desc, inputSchema: schema });
       toolMeta.set(toolName, { method, apiName: name });
+
+      // Dynamic auth lookup so set_api_auth works without rebuilding handlers
       handlers.set(toolName, mock
         ? () => ({ status: 200, ok: true, mock: true, data: getMockResponse(op), headers: {} })
-        : (args) => withRetry(() => executeRequest(baseUrl, method, p, op, args, auth, timeout, name), retries)
+        : (args) => withRetry(() => executeRequest(baseUrl, method, p, op, args, loadedApis.get(name)?.auth ?? auth, timeout, name), retries)
       );
+
       if (method === 'get' && !testEndpoint && (schema.required || []).length === 0) testEndpoint = { method, path: p, operation: op };
       for (const tag of (op.tags || ['(untagged)'])) { if (!tagMap[tag]) tagMap[tag] = { description: '', count: 0 }; tagMap[tag].count++; }
     }
   }
-  loadedApis.set(name, { specUrl: resolved, title: api.info?.title || name, description: api.info?.description || '', version: api.info?.version || '', tags: tagMap, tools, handlers, auth, mock, baseUrl, testEndpoint, timeout, retries });
-  console.error(`[Blobfish] Loaded "${api.info?.title}" as "${name}" — ${tools.length} tools${mock ? ' [mock]' : ''}`);
+
+  // SEC-4: Reject specs that generate too many tools (require tag filtering)
+  if (tools.length > MAX_TOOLS_PER_SPEC) {
+    throw new Error(`Spec generates ${tools.length} tools (max ${MAX_TOOLS_PER_SPEC}). Use include_tags to filter — e.g. include_tags: ["repos", "issues"]`);
+  }
+
+  loadedApis.set(name, { specUrl: resolved, title: api.info?.title || name, description: sanitizeDesc(api.info?.description || ''), version: api.info?.version || '', tags: tagMap, tools, handlers, auth, mock, baseUrl, testEndpoint, timeout, retries });
+  console.error(`[Blobfish] Loaded "${api.info?.title}" as "${name}" — ${tools.length} tools${mock ? ' [mock]' : ''}${includeTags ? ` [tags: ${includeTags.join(',')}]` : ''}`);
   return { name, count: tools.length, title: api.info?.title };
 }
 
@@ -385,25 +544,38 @@ function flattenPostmanItems(items) {
   for (const item of items) { if (Array.isArray(item.item)) out.push(...flattenPostmanItems(item.item)); else if (item.request) out.push(item); }
   return out;
 }
+
 async function loadPostman(source, nameHint, auth, mock = false, timeout = DEFAULT_TIMEOUT, retries = DEFAULT_RETRIES) {
-  const isLocal = !source.startsWith('http');
-  const raw = isLocal ? fs.readFileSync(path.resolve(source), 'utf8') : await fetch(source).then(r => r.text());
+  let raw;
+  if (!source.startsWith('http')) {
+    const resolved = assertSafeLocalPath(source); // SEC-3
+    raw = fs.readFileSync(resolved, 'utf8');
+  } else {
+    await assertSafeUrl(source); // SEC-1
+    raw = await fetch(source).then(r => r.text());
+  }
   const collection = JSON.parse(raw);
   const name = slugify(nameHint || collection.info?.name);
   const tools = [], handlers = new Map();
+
   for (const item of flattenPostmanItems(collection.item || [])) {
     const req = item.request;
     const method = (req.method || 'GET').toLowerCase();
     const rawUrl = typeof req.url === 'string' ? req.url : (req.url?.raw || '');
     const urlVars = typeof req.url === 'object' ? (req.url.variable || []) : [];
     const queryItems = typeof req.url === 'object' ? (req.url.query || []) : [];
-    const toolName = `${name}_${method}_${item.name.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '')}`.slice(0, 64);
+
+    // SEC-7: Prevent shadowing
+    const toolName = makeUniqueName(`${name}_${method}_${item.name.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '')}`.slice(0, 64));
     const properties = {}, required = [];
-    for (const v of urlVars) { properties[v.key] = { type: 'string', description: v.description || `Path variable: ${v.key}` }; required.push(v.key); }
-    for (const q of queryItems) { if (!q.disabled) properties[q.key] = { type: 'string', description: q.description || q.key }; }
+    for (const v of urlVars) { properties[v.key] = { type: 'string', description: sanitizeDesc(v.description || `Path variable: ${v.key}`) }; required.push(v.key); }
+    for (const q of queryItems) { if (!q.disabled) properties[q.key] = { type: 'string', description: sanitizeDesc(q.description || q.key) }; }
     if (req.body?.raw) properties.body = { type: 'object', description: 'Request body' };
-    tools.push({ name: toolName, description: item.name, inputSchema: { type: 'object', properties, ...(required.length ? { required } : {}) } });
+
+    // SEC-2: Sanitize tool description
+    tools.push({ name: toolName, description: sanitizeDesc(item.name), inputSchema: { type: 'object', properties, ...(required.length ? { required } : {}) } });
     toolMeta.set(toolName, { method, apiName: name });
+
     handlers.set(toolName, async (args) => {
       if (mock) return { status: 200, ok: true, mock: true, data: { message: 'Mock response' }, headers: {} };
       let url = rawUrl;
@@ -411,19 +583,27 @@ async function loadPostman(source, nameHint, auth, mock = false, timeout = DEFAU
       const qp = new URLSearchParams();
       for (const q of queryItems) { if (!q.disabled && args[q.key]) qp.set(q.key, args[q.key]); }
       const qs = qp.toString(); if (qs) url += (url.includes('?') ? '&' : '?') + qs;
-      const headers = buildAuthHeaders(auth);
+      await assertSafeUrl(url); // SEC-1: SSRF check on final URL
+      const currentAuth = loadedApis.get(name)?.auth ?? auth; // dynamic auth for set_api_auth
+      const headers = buildAuthHeaders(currentAuth);
       for (const h of (req.header || [])) { if (!h.disabled) headers[h.key] = h.value; }
       const init = { method: method.toUpperCase(), headers, signal: AbortSignal.timeout(timeout) };
       if (args.body) { headers['Content-Type'] = 'application/json'; init.body = JSON.stringify(args.body); }
       else if (req.body?.raw && method !== 'get') { headers['Content-Type'] = 'application/json'; init.body = req.body.raw; }
       const t0 = Date.now(); const res = await fetch(url, init); const ms = Date.now() - t0;
-      const text = await res.text(); let data; try { data = JSON.parse(text); } catch { data = text; }
+      // SEC-4: Response size limit
+      const cl = parseInt(res.headers.get('content-length') || '0');
+      if (cl > MAX_RESP_SIZE) throw new Error(`Response too large`);
+      const text = await res.text();
+      if (text.length > MAX_RESP_SIZE) throw new Error(`Response body too large`);
+      let data; try { data = JSON.parse(text); } catch { data = text; }
       const resHeaders = {}; for (const [k, v] of res.headers.entries()) resHeaders[k.toLowerCase()] = v;
       logRequest({ method: method.toUpperCase(), url, status: res.status, ms });
       updateRateLimit(name, resHeaders);
       return { status: res.status, ok: res.ok, data, headers: resHeaders };
     });
   }
+
   loadedApis.set(name, { specUrl: source, title: collection.info?.name || name, description: '', version: '', tags: {}, tools, handlers, auth, mock, baseUrl: '', testEndpoint: null, isPostman: true, timeout, retries });
   console.error(`[Blobfish] Loaded Postman collection "${collection.info?.name}" as "${name}" — ${tools.length} tools`);
   return { name, count: tools.length, title: collection.info?.name };
@@ -431,21 +611,23 @@ async function loadPostman(source, nameHint, auth, mock = false, timeout = DEFAU
 
 // ── Auto-detect format ────────────────────────────────────────────────────────
 
-async function autoLoad(source, nameHint, auth, mock, timeout, retries) {
+async function autoLoad(source, nameHint, auth, mock, timeout, retries, includeTags, excludeTags) {
   const isLocal = !source.startsWith('http://') && !source.startsWith('https://');
   if (isLocal) {
-    const parsed = JSON.parse(fs.readFileSync(path.resolve(source), 'utf8'));
+    const resolved = assertSafeLocalPath(source); // SEC-3
+    const parsed = JSON.parse(fs.readFileSync(resolved, 'utf8'));
     if (parsed.info?._postman_id || (typeof parsed.info?.schema === 'string' && parsed.info.schema.includes('postman')))
       return loadPostman(source, nameHint, auth, mock, timeout, retries);
-    return loadSpec(source, nameHint, auth, mock, timeout, retries);
+    return loadSpec(source, nameHint, auth, mock, timeout, retries, includeTags, excludeTags);
   }
+  await assertSafeUrl(source); // SEC-1
   try {
     const text = await fetch(source, { signal: AbortSignal.timeout(5000) }).then(r => r.text());
     const parsed = JSON.parse(text);
     if (parsed.info?._postman_id || (typeof parsed.info?.schema === 'string' && parsed.info.schema.includes('postman')))
       return loadPostman(source, nameHint, auth, mock, timeout, retries);
-  } catch { /* fall through */ }
-  return loadSpec(source, nameHint, auth, mock, timeout, retries);
+  } catch (e) { if (e.message?.startsWith('SSRF')) throw e; /* fall through */ }
+  return loadSpec(source, nameHint, auth, mock, timeout, retries, includeTags, excludeTags);
 }
 
 // ── Server ────────────────────────────────────────────────────────────────────
@@ -454,7 +636,7 @@ function getAllTools() { return [...loadedApis.values()].flatMap(a => a.tools); 
 function findHandler(n) { for (const { handlers } of loadedApis.values()) { if (handlers.has(n)) return handlers.get(n); } return null; }
 function findTool(n) { for (const { tools } of loadedApis.values()) { const t = tools.find(t => t.name === n); if (t) return t; } return null; }
 
-const server = new Server({ name: 'blobfish', version: '6.0.0' }, { capabilities: { tools: {} } });
+const server = new Server({ name: 'blobfish', version: '7.0.0' }, { capabilities: { tools: {} } });
 server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: [...META_TOOLS, ...getAllTools()] }));
 
 server.setRequestHandler(CallToolRequestSchema, async (req) => {
@@ -462,19 +644,28 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
   try {
 
     if (name === 'discover_api') {
-      const { base_url, name: nameHint, auth, mock, timeout } = args;
+      const { base_url, name: nameHint, auth, mock, timeout, include_tags, exclude_tags } = args;
       const specUrl = await probeSpecUrl(base_url);
       if (!specUrl) return { content: [{ type: 'text', text: `Could not find spec at ${base_url}. Tried ${SPEC_PROBE_PATHS.length} paths.` }], isError: true };
-      const result = await loadSpec(specUrl, nameHint, auth, mock, timeout);
+      const result = await loadSpec(specUrl, nameHint, auth, mock, timeout, DEFAULT_RETRIES, include_tags, exclude_tags);
       await server.sendToolListChanged();
       return { content: [{ type: 'text', text: `Discovered: ${specUrl}\nLoaded "${result.title}" as "${result.name}" — ${result.count} tools.` }] };
     }
 
     if (name === 'load_api') {
-      const { spec_url, name: nameHint, auth, mock, timeout, retries } = args;
-      const result = await autoLoad(spec_url, nameHint, auth, mock, timeout, retries);
+      const { spec_url, name: nameHint, auth, mock, timeout, retries, include_tags, exclude_tags } = args;
+      const result = await autoLoad(spec_url, nameHint, auth, mock, timeout, retries, include_tags, exclude_tags);
       await server.sendToolListChanged();
       return { content: [{ type: 'text', text: `Loaded "${result.title}" as "${result.name}" — ${result.count} tools.` }] };
+    }
+
+    // SEC-11: set_api_auth with credential warning in tool description
+    if (name === 'set_api_auth') {
+      const { name: apiName, auth } = args;
+      const api = loadedApis.get(apiName);
+      if (!api) return { content: [{ type: 'text', text: `No API named "${apiName}". Use list_apis to see what's loaded.` }], isError: true };
+      api.auth = auth; // handlers use dynamic lookup: loadedApis.get(name)?.auth
+      return { content: [{ type: 'text', text: `Auth updated for "${apiName}". All subsequent calls will use the new credentials.` }] };
     }
 
     if (name === 'fetch_all') {
@@ -485,8 +676,13 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
       while (pages < max_pages) {
         let response;
         if (nextUrl) {
+          await assertSafeUrl(nextUrl); // SEC-8: SSRF check on Link header URL
           const res = await fetch(nextUrl, { signal: AbortSignal.timeout(DEFAULT_TIMEOUT) });
-          const text = await res.text(); let data; try { data = JSON.parse(text); } catch { data = text; }
+          const cl = parseInt(res.headers.get('content-length') || '0');
+          if (cl > MAX_RESP_SIZE) break;
+          const text = await res.text();
+          if (text.length > MAX_RESP_SIZE) break;
+          let data; try { data = JSON.parse(text); } catch { data = text; }
           const h = {}; for (const [k, v] of res.headers.entries()) h[k.toLowerCase()] = v;
           response = { status: res.status, ok: res.ok, data, headers: h };
         } else { response = await handler(currentArgs); }
@@ -518,11 +714,12 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
           results[stepId] = result; results[i] = result;
           stepLog.push({ id: stepId, tool: step.tool, status: result.status, ok: result.ok });
         } catch (err) {
+          const msg = sanitizeError(err); // SEC-10
           if (step.on_error === 'continue') {
-            results[stepId] = { ok: false, error: err.message };
-            stepLog.push({ id: stepId, tool: step.tool, ok: false, error: err.message });
+            results[stepId] = { ok: false, error: msg };
+            stepLog.push({ id: stepId, tool: step.tool, ok: false, error: msg });
           } else {
-            return { content: [{ type: 'text', text: `Workflow failed at step "${stepId}": ${err.message}\nCompleted: ${JSON.stringify(stepLog)}` }], isError: true };
+            return { content: [{ type: 'text', text: `Workflow failed at step "${stepId}": ${msg}\nCompleted: ${JSON.stringify(stepLog)}` }], isError: true };
           }
         }
       }
@@ -531,9 +728,7 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
 
     if (name === 'cache_stats') {
       const total = cacheHits + cacheMisses;
-      const entries = [...responseCache.entries()].map(([key, { expiresAt }]) => ({
-        key, expires_in: `${Math.max(0, Math.ceil((expiresAt - Date.now()) / 1000))}s`
-      }));
+      const entries = [...responseCache.entries()].map(([key, { expiresAt }]) => ({ key, expires_in: `${Math.max(0, Math.ceil((expiresAt - Date.now()) / 1000))}s` }));
       return { content: [{ type: 'text', text: JSON.stringify({ size: responseCache.size, hits: cacheHits, misses: cacheMisses, hit_rate: total ? `${((cacheHits / total) * 100).toFixed(1)}%` : 'n/a', entries }, null, 2) }] };
     }
 
@@ -600,15 +795,12 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
     }
 
     if (apiName) await waitIfRateLimited(apiName);
-
     const result = await handler(args);
-
     if (isGet && ttl > 0 && result.ok) setCached(getCacheKey(name, args), result, ttl);
-
     return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
 
   } catch (err) {
-    return { content: [{ type: 'text', text: `Error: ${err.message}` }], isError: true };
+    return { content: [{ type: 'text', text: `Error: ${sanitizeError(err)}` }], isError: true }; // SEC-10
   }
 });
 
@@ -619,7 +811,7 @@ if (fs.existsSync(blobfishConfigPath)) {
   const cfg = JSON.parse(fs.readFileSync(blobfishConfigPath, 'utf8'));
   for (const wf of Object.entries(cfg.workflows || {})) savedWorkflows.set(wf[0], wf[1]);
   for (const entry of (cfg.apis || [])) {
-    await autoLoad(entry.url, entry.name, interpolateObj(entry.auth), entry.mock || false, entry.timeout ?? cfg.timeout, entry.retries ?? cfg.retries);
+    await autoLoad(entry.url, entry.name, interpolateObj(entry.auth), entry.mock || false, entry.timeout ?? cfg.timeout, entry.retries ?? cfg.retries, entry.include_tags, entry.exclude_tags);
   }
 }
 
