@@ -1,0 +1,12 @@
+{
+  "name": "stripe",
+  "title": "Stripe API",
+  "description": "Payments, subscriptions, customers, invoices, and refunds.",
+  "spec_url": "https://raw.githubusercontent.com/stripe/openapi/master/openapi/spec3.json",
+  "include_tags": ["Charges", "Customers", "PaymentIntents", "Subscriptions", "Invoices", "Refunds"],
+  "auth": {
+    "type": "bearer",
+    "key": "${STRIPE_SECRET_KEY}"
+  },
+  "notes": "Requires STRIPE_SECRET_KEY env var. include_tags pre-set — full spec has 400+ endpoints."
+}

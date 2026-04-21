@@ -10,6 +10,11 @@ export const AUTH_SCHEMA = {
 
 export const META_TOOLS = [
   {
+    name: 'list_registry',
+    description: 'List all pre-configured APIs in the registry. Use load_api with just the name (e.g. "github") to load one instantly.',
+    inputSchema: { type: 'object', properties: {} },
+  },
+  {
     name: 'discover_api',
     description: 'Auto-find and load an API from just a domain — no spec URL needed.',
     inputSchema: {

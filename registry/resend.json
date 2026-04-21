@@ -1,0 +1,11 @@
+{
+  "name": "resend",
+  "title": "Resend API",
+  "description": "Send transactional emails, manage contacts, audiences, domains, and broadcast campaigns.",
+  "spec_url": "https://raw.githubusercontent.com/resendlabs/resend-openapi/main/resend.yaml",
+  "auth": {
+    "type": "bearer",
+    "key": "${RESEND_API_KEY}"
+  },
+  "notes": "Requires RESEND_API_KEY from resend.com/api-keys."
+}

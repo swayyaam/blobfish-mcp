@@ -1,0 +1,11 @@
+{
+  "name": "openai",
+  "title": "OpenAI API",
+  "description": "Chat completions, embeddings, images, models, and more.",
+  "spec_url": "https://raw.githubusercontent.com/openai/openai-openapi/master/openapi.yaml",
+  "auth": {
+    "type": "bearer",
+    "key": "${OPENAI_API_KEY}"
+  },
+  "notes": "Requires OPENAI_API_KEY env var."
+}

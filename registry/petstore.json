@@ -1,0 +1,6 @@
+{
+  "name": "petstore",
+  "title": "Swagger Petstore",
+  "description": "Classic demo API. No auth required. Great for testing Blobfish.",
+  "spec_url": "https://petstore.swagger.io/v2/swagger.json"
+}

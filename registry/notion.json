@@ -1,0 +1,11 @@
+{
+  "name": "notion",
+  "title": "Notion API",
+  "description": "Read and write Notion pages, databases, and blocks.",
+  "spec_url": "https://raw.githubusercontent.com/ramnes/notion-sdk-py/main/openapi.yaml",
+  "auth": {
+    "type": "bearer",
+    "key": "${NOTION_TOKEN}"
+  },
+  "notes": "Requires NOTION_TOKEN env var (create an integration at notion.so/my-integrations)."
+}

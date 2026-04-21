@@ -1,0 +1,7 @@
+{
+  "name": "openmeteo",
+  "title": "Open-Meteo Weather API",
+  "description": "Free weather forecasts and historical data. No API key required.",
+  "spec_url": "https://api.open-meteo.com/v2/openapi.json",
+  "include_tags": ["Weather Forecast API"]
+}

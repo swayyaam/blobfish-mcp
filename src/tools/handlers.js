@@ -11,6 +11,8 @@ import { executeRequest } from '../http.js';
 import { loadSpec } from '../loaders/openapi.js';
 import { autoLoad } from '../loaders/auto.js';
 import { probeSpecUrl } from '../loaders/probe.js';
+import { getRegistryEntry, listRegistryEntries, isRegistryName } from '../loaders/registry.js';
+import { interpolateObj } from '../utils.js';
 import { DEFAULT_TIMEOUT, DEFAULT_RETRIES, MAX_LOG_ENTRIES, MAX_RESP_SIZE } from '../constants.js';
 import { META_TOOLS } from './meta.js';
 
@@ -27,8 +29,34 @@ export async function handleToolCall(req, { notifyToolsChanged }) {
       return { content: [{ type: 'text', text: `Discovered: ${specUrl}\nLoaded "${result.title}" as "${result.name}" — ${result.count} tools.` }] };
     }
 
+    if (name === 'list_registry') {
+      const entries = listRegistryEntries();
+      if (entries.length === 0) return { content: [{ type: 'text', text: 'No registry entries found. Add JSON files to the registry/ folder.' }] };
+      const lines = entries.map(e =>
+        `• ${e.name} — ${e.title}${e.auth_required ? ' 🔑' : ' (no auth)'}${e.description ? `\n  ${e.description}` : ''}${e.notes ? `\n  Note: ${e.notes}` : ''}`
+      );
+      return { content: [{ type: 'text', text: `${entries.length} APIs in registry. Load any with: load_api("name")\n\n${lines.join('\n\n')}` }] };
+    }
+
     if (name === 'load_api') {
-      const { spec_url, name: nameHint, auth, mock, timeout, retries, include_tags, exclude_tags, shallow } = args;
+      let { spec_url, name: nameHint, auth, mock, timeout, retries, include_tags, exclude_tags, shallow } = args;
+
+      // Registry lookup: "github" → registry/github.json
+      if (isRegistryName(spec_url)) {
+        const entry = getRegistryEntry(spec_url);
+        if (entry) {
+          nameHint   = nameHint   ?? entry.name;
+          auth       = auth       ?? (entry.auth ? interpolateObj(entry.auth) : undefined);
+          include_tags = include_tags ?? entry.include_tags;
+          exclude_tags = exclude_tags ?? entry.exclude_tags;
+          shallow    = shallow    ?? entry.shallow;
+          mock       = mock       ?? entry.mock;
+          spec_url   = entry.spec_url;
+        } else {
+          return { content: [{ type: 'text', text: `"${spec_url}" not found in registry. Run list_registry to see available APIs, or pass a full URL.` }], isError: true };
+        }
+      }
+
       const result = await autoLoad(spec_url, nameHint, auth, mock, timeout, retries, include_tags, exclude_tags, shallow);
       await notifyToolsChanged();
       return { content: [{ type: 'text', text: `Loaded "${result.title}" as "${result.name}" — ${result.count} tools.` }] };

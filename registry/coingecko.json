@@ -1,0 +1,8 @@
+{
+  "name": "coingecko",
+  "title": "CoinGecko API",
+  "description": "Free crypto market data — prices, market caps, trending coins, exchanges. No API key required.",
+  "spec_url": "https://docs.coingecko.com/openapi/65bf9cabb0951b0072ea9898",
+  "include_tags": ["simple", "coins", "asset_platforms", "categories", "exchanges", "trending", "global"],
+  "notes": "Free tier has rate limits. For higher limits set COINGECKO_API_KEY and add apikey auth."
+}

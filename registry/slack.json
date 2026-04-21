@@ -1,0 +1,12 @@
+{
+  "name": "slack",
+  "title": "Slack Web API",
+  "description": "Send messages, manage channels, users, files, and reactions.",
+  "spec_url": "https://raw.githubusercontent.com/slackapi/slack-api-specs/master/web-api/slack_web_openapi_v2.json",
+  "include_tags": ["chat", "channels", "users", "conversations", "files", "reactions", "search"],
+  "auth": {
+    "type": "bearer",
+    "key": "${SLACK_BOT_TOKEN}"
+  },
+  "notes": "Requires SLACK_BOT_TOKEN from api.slack.com/apps. Create an app, add OAuth scopes, install to workspace."
+}

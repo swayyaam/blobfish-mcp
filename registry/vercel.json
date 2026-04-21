@@ -1,0 +1,12 @@
+{
+  "name": "vercel",
+  "title": "Vercel API",
+  "description": "Deployments, projects, domains, environment variables, teams, and logs.",
+  "spec_url": "https://openapi.vercel.sh",
+  "include_tags": ["deployments", "projects", "domains", "env", "teams", "aliases"],
+  "auth": {
+    "type": "bearer",
+    "key": "${VERCEL_TOKEN}"
+  },
+  "notes": "Requires VERCEL_TOKEN from vercel.com/account/tokens."
+}

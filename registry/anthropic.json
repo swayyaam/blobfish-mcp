@@ -1,0 +1,12 @@
+{
+  "name": "anthropic",
+  "title": "Anthropic API",
+  "description": "Claude models — messages, streaming, tool use, batches, and model listing. Claude calling the Claude API through Blobfish.",
+  "spec_url": "https://raw.githubusercontent.com/anthropics/anthropic-sdk-python/main/openapi.yaml",
+  "auth": {
+    "type": "apikey",
+    "key": "${ANTHROPIC_API_KEY}",
+    "header": "x-api-key"
+  },
+  "notes": "Requires ANTHROPIC_API_KEY env var."
+}
