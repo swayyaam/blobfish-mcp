@@ -1,60 +1,17 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-// ── Unit tests for pure utility functions ─────────────────────────────────────
-// These don't spin up the MCP server — they test logic in isolation.
-
-// We inline the functions under test to avoid importing server.js
-// (which connects to stdio and blocks). Extract to lib/ if this grows.
-
-function sanitizeDesc(str, maxLen = 300) {
-  if (typeof str !== 'string') return str;
-  return str.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '').slice(0, maxLen);
-}
-
-function scrubUrl(urlStr) {
-  try {
-    const u = new URL(urlStr);
-    const CRED_PARAMS = new Set(['api_key', 'apikey', 'access_token', 'token', 'key', 'secret', 'password']);
-    for (const k of u.searchParams.keys()) {
-      if (CRED_PARAMS.has(k.toLowerCase())) u.searchParams.set(k, '[REDACTED]');
-    }
-    return u.toString();
-  } catch { return urlStr; }
-}
-
-function getCacheKey(toolName, args) {
-  try {
-    const stable = JSON.stringify(args, Object.keys(args || {}).sort());
-    return `${toolName}:${stable}`;
-  } catch { return `${toolName}:nocache`; }
-}
-
-function evaluateCondition(expr) {
-  const s = String(expr).trim();
-  const eq = s.match(/^(.+?)\s*==\s*(.+)$/);
-  if (eq) return String(eq[1].trim()) === String(eq[2].trim());
-  const ne = s.match(/^(.+?)\s*!=\s*(.+)$/);
-  if (ne) return String(ne[1].trim()) !== String(ne[2].trim());
-  return s !== '' && s !== 'false' && s !== '0' && s !== 'null' && s !== 'undefined';
-}
-
-function sanitizeError(err) {
-  let msg = err?.message || String(err);
-  msg = msg.replace(/[A-Za-z]:\\[^\s,;]*/g, '[path]');
-  msg = msg.replace(/\/[^\s,;]{3,}/g, '[path]');
-  return msg;
-}
-
-function slugify(str) {
-  return (str || 'api').toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '').slice(0, 20) || 'api';
-}
+// Import from actual modules — safe since none of src/ connects to stdio
+import { sanitizeDesc, scrubUrl, sanitizeError } from '../src/security.js';
+import { slugify } from '../src/utils.js';
+import { getCacheKey } from '../src/cache.js';
+import { evaluateCondition } from '../src/workflow.js';
+import { isRegistryName, checkUnresolvedAuth } from '../src/loaders/registry.js';
 
 // ── sanitizeDesc ──────────────────────────────────────────────────────────────
 
 test('sanitizeDesc truncates long descriptions', () => {
-  const long = 'a'.repeat(500);
-  assert.equal(sanitizeDesc(long).length, 300);
+  assert.equal(sanitizeDesc('a'.repeat(500)).length, 300);
 });
 
 test('sanitizeDesc strips control characters', () => {
@@ -74,17 +31,14 @@ test('sanitizeDesc handles non-string input', () => {
 // ── scrubUrl ──────────────────────────────────────────────────────────────────
 
 test('scrubUrl redacts api_key param', () => {
-  const url = 'https://api.example.com/data?api_key=sk-secret123&limit=10';
-  const scrubbed = decodeURIComponent(scrubUrl(url));
+  const scrubbed = decodeURIComponent(scrubUrl('https://api.example.com/data?api_key=sk-secret&limit=10'));
   assert.ok(scrubbed.includes('[REDACTED]'));
-  assert.ok(!scrubbed.includes('sk-secret123'));
+  assert.ok(!scrubbed.includes('sk-secret'));
   assert.ok(scrubbed.includes('limit=10'));
 });
 
 test('scrubUrl redacts access_token param', () => {
-  const url = 'https://api.example.com/me?access_token=tok_abc&format=json';
-  const scrubbed = scrubUrl(url);
-  assert.ok(!scrubbed.includes('tok_abc'));
+  assert.ok(!decodeURIComponent(scrubUrl('https://api.example.com/me?access_token=tok_abc')).includes('tok_abc'));
 });
 
 test('scrubUrl leaves non-credential params untouched', () => {
@@ -96,12 +50,24 @@ test('scrubUrl handles invalid URLs gracefully', () => {
   assert.equal(scrubUrl('not-a-url'), 'not-a-url');
 });
 
+// ── sanitizeError ─────────────────────────────────────────────────────────────
+
+test('sanitizeError strips Windows paths', () => {
+  const msg = sanitizeError(new Error('Cannot read C:\\Users\\swayam\\secret.json'));
+  assert.ok(!msg.includes('C:\\'));
+  assert.ok(msg.includes('[path]'));
+});
+
+test('sanitizeError strips Unix paths', () => {
+  const msg = sanitizeError(new Error('Failed to open /home/user/.env'));
+  assert.ok(!msg.includes('/home/user'));
+  assert.ok(msg.includes('[path]'));
+});
+
 // ── getCacheKey ───────────────────────────────────────────────────────────────
 
 test('getCacheKey produces stable key regardless of arg order', () => {
-  const k1 = getCacheKey('my_tool', { b: 2, a: 1 });
-  const k2 = getCacheKey('my_tool', { a: 1, b: 2 });
-  assert.equal(k1, k2);
+  assert.equal(getCacheKey('tool', { b: 2, a: 1 }), getCacheKey('tool', { a: 1, b: 2 }));
 });
 
 test('getCacheKey handles circular references without throwing', () => {
@@ -113,12 +79,12 @@ test('getCacheKey handles circular references without throwing', () => {
 
 // ── evaluateCondition ─────────────────────────────────────────────────────────
 
-test('evaluateCondition: equality match', () => {
+test('evaluateCondition: equality', () => {
   assert.equal(evaluateCondition('404 == 404'), true);
   assert.equal(evaluateCondition('200 == 404'), false);
 });
 
-test('evaluateCondition: inequality match', () => {
+test('evaluateCondition: inequality', () => {
   assert.equal(evaluateCondition('200 != 404'), true);
   assert.equal(evaluateCondition('404 != 404'), false);
 });
@@ -129,20 +95,6 @@ test('evaluateCondition: truthy/falsy strings', () => {
   assert.equal(evaluateCondition(''), false);
   assert.equal(evaluateCondition('0'), false);
   assert.equal(evaluateCondition('hello'), true);
-});
-
-// ── sanitizeError ─────────────────────────────────────────────────────────────
-
-test('sanitizeError strips Windows paths', () => {
-  const err = new Error('Cannot read C:\\Users\\swayam\\secret.json');
-  assert.ok(!sanitizeError(err).includes('C:\\'));
-  assert.ok(sanitizeError(err).includes('[path]'));
-});
-
-test('sanitizeError strips Unix paths', () => {
-  const err = new Error('Failed to open /home/user/.env');
-  assert.ok(!sanitizeError(err).includes('/home/user'));
-  assert.ok(sanitizeError(err).includes('[path]'));
 });
 
 // ── slugify ───────────────────────────────────────────────────────────────────
@@ -156,7 +108,54 @@ test('slugify truncates to 20 chars', () => {
   assert.ok(slugify('a'.repeat(50)).length <= 20);
 });
 
-test('slugify handles empty input', () => {
+test('slugify handles empty/null input', () => {
   assert.equal(slugify(''), 'api');
   assert.equal(slugify(null), 'api');
+});
+
+// ── isRegistryName ────────────────────────────────────────────────────────────
+
+test('isRegistryName identifies plain names', () => {
+  assert.equal(isRegistryName('github'), true);
+  assert.equal(isRegistryName('stripe'), true);
+  assert.equal(isRegistryName('coingecko'), true);
+});
+
+test('isRegistryName rejects URLs', () => {
+  assert.equal(isRegistryName('https://petstore.swagger.io/v2/swagger.json'), false);
+  assert.equal(isRegistryName('http://localhost:3000'), false);
+});
+
+test('isRegistryName rejects file paths', () => {
+  assert.equal(isRegistryName('./my-api.json'), false);
+  assert.equal(isRegistryName('/absolute/path.yaml'), false);
+  assert.equal(isRegistryName('spec.json'), false);
+});
+
+// ── checkUnresolvedAuth ───────────────────────────────────────────────────────
+
+test('checkUnresolvedAuth passes when all vars are resolved', () => {
+  assert.doesNotThrow(() => checkUnresolvedAuth({ type: 'bearer', key: 'sk-actual-key' }, 'myapi'));
+});
+
+test('checkUnresolvedAuth throws on unresolved ${VAR}', () => {
+  assert.throws(
+    () => checkUnresolvedAuth({ type: 'bearer', key: '${STRIPE_SECRET_KEY}' }, 'stripe'),
+    /STRIPE_SECRET_KEY/
+  );
+});
+
+test('checkUnresolvedAuth error message includes set_api_auth instructions', () => {
+  try {
+    checkUnresolvedAuth({ type: 'bearer', key: '${MY_TOKEN}' }, 'myapi');
+    assert.fail('should have thrown');
+  } catch (e) {
+    assert.ok(e.message.includes('set_api_auth'));
+    assert.ok(e.message.includes('MY_TOKEN'));
+  }
+});
+
+test('checkUnresolvedAuth is safe with null/undefined auth', () => {
+  assert.doesNotThrow(() => checkUnresolvedAuth(null, 'api'));
+  assert.doesNotThrow(() => checkUnresolvedAuth(undefined, 'api'));
 });

@@ -10,6 +10,10 @@
   "files": [
     "server.js",
     "setup.js",
+    "src/",
+    "registry/",
+    "workflows/",
+    "smithery.yaml",
     ".env.example",
     "blobfish.example.json"
   ],

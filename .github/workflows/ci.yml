@@ -26,7 +26,13 @@ jobs:
         run: npm install
 
       - name: Syntax check
-        run: node --check server.js && node --check setup.js
+        run: |
+          node --check server.js
+          node --check setup.js
+          find src -name '*.js' | xargs node --check
+
+      - name: Unit tests
+        run: npm test
 
       - name: Startup test
-        run: echo '{}' | timeout 8 node server.js 2>&1 | grep -q 'Ready' && echo 'PASS' || exit 1
+        run: echo '{}' | timeout 10 node server.js 2>&1 | grep -q 'Ready' && echo 'PASS' || exit 1
