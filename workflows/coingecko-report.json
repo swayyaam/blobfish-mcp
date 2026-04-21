@@ -1,0 +1,24 @@
+{
+  "_description": "Fetch a crypto market report from CoinGecko. No API key required.",
+  "_setup": "load_api('https://api.coingecko.com/api/v3/openapi.json', name: 'coingecko')",
+  "steps": [
+    {
+      "id": "price",
+      "tool": "coingecko_get_simple_price",
+      "args": {
+        "ids": "{{ input.coins }}",
+        "vs_currencies": "usd",
+        "include_market_cap": "true",
+        "include_24hr_change": "true"
+      }
+    },
+    {
+      "id": "trending",
+      "tool": "coingecko_get_search_trending",
+      "args": {}
+    }
+  ],
+  "input": {
+    "coins": "bitcoin,ethereum,solana"
+  }
+}

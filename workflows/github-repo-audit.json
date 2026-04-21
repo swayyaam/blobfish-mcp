@@ -1,0 +1,30 @@
+{
+  "_description": "Audit a GitHub user's repositories. Requires GITHUB_TOKEN env var.",
+  "_setup": "load_api('https://raw.githubusercontent.com/github/rest-api-description/main/descriptions/api.github.com/api.github.com.json', name: 'github', include_tags: ['repos', 'issues'])",
+  "steps": [
+    {
+      "id": "repos",
+      "tool": "github_get_repos_for_user",
+      "args": {
+        "username": "{{ input.username }}",
+        "sort": "updated",
+        "per_page": "10"
+      }
+    },
+    {
+      "id": "issues",
+      "tool": "github_list_issues_for_repo",
+      "foreach": "{{ steps.repos.data }}",
+      "run_if": "{{ item.open_issues_count }} != 0",
+      "args": {
+        "owner": "{{ input.username }}",
+        "repo": "{{ item.name }}",
+        "state": "open",
+        "per_page": "5"
+      }
+    }
+  ],
+  "input": {
+    "username": "swayam-mishra"
+  }
+}

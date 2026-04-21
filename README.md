@@ -66,15 +66,32 @@ Add to your Claude Desktop config (`%APPDATA%\Claude\claude_desktop_config.json`
 
 ---
 
+## Compatible clients
+
+Works with any MCP-compatible client:
+
+- **Claude Desktop** — primary target, setup via `npm run setup`
+- **Cursor** — add to `.cursor/mcp.json` using the same config format
+- **Zed** — add to Zed's MCP settings
+- **Smithery** — one-click install via `smithery.yaml`
+
+---
+
 ## How it works
 
-Blobfish starts with **8 meta-tools** Claude can always call:
+Blobfish starts with **14 meta-tools** Claude can always call:
 
 | Tool | Description |
 |------|-------------|
 | `discover_api` | Auto-find a spec from just a domain — probes 15 common paths |
-| `load_api` | Load by exact URL or local file path (OpenAPI or Postman) |
+| `load_api` | Load by URL or local file (OpenAPI, Swagger, or Postman). Supports `include_tags`, `shallow` |
+| `set_api_auth` | Update credentials for a loaded API mid-conversation |
 | `fetch_all` | Auto-paginate any endpoint — Link headers, cursor, offset |
+| `run_workflow` | Multi-step pipelines with `{{ template }}` syntax, `foreach`, and `run_if` |
+| `get_last_request_log` | See the exact URL/body of the last N requests — use when debugging 400 errors |
+| `rate_limit_status` | Show which APIs are rate-limited and when they reset |
+| `cache_stats` | Cache hit rate, size, and entries |
+| `clear_cache` | Clear cached responses |
 | `test_connection` | Ping a loaded API and get status + response time |
 | `inspect_tool` | Show the full input schema of any loaded tool |
 | `api_summary` | Plain-English overview of a loaded API by capability group |
@@ -186,6 +203,27 @@ Responses are generated from the `example` fields in the OpenAPI spec.
 
 ---
 
+## Troubleshooting
+
+**Blobfish doesn't appear in Claude Desktop**
+- Make sure you fully quit Claude Desktop (tray icon → Quit), not just close the window
+- On Windows Store install, config goes in `%LOCALAPPDATA%\Packages\Claude_*\LocalCache\Roaming\Claude\claude_desktop_config.json` — run `npm run setup` to find the right path automatically
+- Check that `node` is in PATH: open a terminal and run `node --version`. If it fails, use the full path (`C:/Program Files/nodejs/node.exe`) in the config's `command` field
+
+**`SSRF blocked` error when loading a spec**
+- The spec URL resolves to a private/internal IP. This is intentional for security.
+- If you're loading a local spec during development: set `BLOBFISH_ALLOW_LOCAL=true` in your `.env`
+
+**`Spec generates N tools (max 500)` error**
+- Use `include_tags` to filter: `load_api(spec_url: "...", include_tags: ["repos", "issues"])`
+- Run `api_summary` first to see what tags are available
+
+**Tools appear but calls return errors**
+- Call `get_last_request_log` after the failed call — Claude can see the exact URL and body sent and self-correct
+- Check `rate_limit_status` — you may be waiting for a rate limit to reset
+
+---
+
 ## Built with
 
 - [MCP SDK](https://github.com/modelcontextprotocol/typescript-sdk) — `@modelcontextprotocol/sdk`
@@ -200,8 +238,8 @@ Responses are generated from the `example` fields in the OpenAPI spec.
 See [todo.md](todo.md) for the full detailed to-do list.
 
 ### Must-have before going public
-- [ ] Selective tool loading (`include_tags` filter for mega-APIs like GitHub/Stripe)
-- [ ] `set_api_auth` tool (inject credentials mid-conversation without restarting)
+- [x] Selective tool loading (`include_tags` / `exclude_tags`)
+- [x] `set_api_auth` tool
 - [ ] Demo GIF
 - [ ] API Registry (`registry/` folder with pre-configured popular APIs)
 - [ ] Understand the codebase (`study.md`)

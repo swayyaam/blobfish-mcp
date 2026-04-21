@@ -1,0 +1,31 @@
+name: blobfish-mcp
+description: Any OpenAPI spec. Zero config. Claude-ready. MCP server that turns any REST API into Claude-callable tools instantly.
+homepage: https://github.com/swayam-mishra/blobfish-mcp
+license: MIT
+
+server:
+  type: stdio
+  command: node
+  args:
+    - server.js
+
+config:
+  env:
+    API_KEY:
+      description: Global Bearer token for API authentication (optional — can also set per-API via blobfish.json)
+      required: false
+    BLOBFISH_TIMEOUT:
+      description: Request timeout in milliseconds (default 30000)
+      required: false
+    BLOBFISH_RETRIES:
+      description: Retry attempts on 5xx errors (default 3)
+      required: false
+    BLOBFISH_CACHE_TTL:
+      description: Response cache TTL in seconds (default 60, set to 0 to disable)
+      required: false
+    BLOBFISH_LOG:
+      description: Log file path, or "true" for ./blobfish.log
+      required: false
+    BLOBFISH_ALLOW_LOCAL:
+      description: Allow loading specs from local file paths (default false)
+      required: false

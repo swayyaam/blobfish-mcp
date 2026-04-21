@@ -1,0 +1,31 @@
+{
+  "_description": "Demo workflow using JSONPlaceholder — no auth required. Fetches a user then their posts.",
+  "_setup": "load_api('https://jsonplaceholder.typicode.com', name: 'jph')",
+  "steps": [
+    {
+      "id": "user",
+      "tool": "jph_get_users_id",
+      "args": {
+        "id": "{{ input.userId }}"
+      }
+    },
+    {
+      "id": "posts",
+      "tool": "jph_get_posts",
+      "args": {
+        "userId": "{{ steps.user.data.id }}"
+      }
+    },
+    {
+      "id": "first_post_comments",
+      "tool": "jph_get_posts_id_comments",
+      "run_if": "{{ steps.posts.data.length }} != 0",
+      "args": {
+        "id": "{{ steps.posts.data.0.id }}"
+      }
+    }
+  ],
+  "input": {
+    "userId": "1"
+  }
+}
