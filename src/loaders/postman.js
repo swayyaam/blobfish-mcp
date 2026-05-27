@@ -14,6 +14,11 @@ function flattenItems(items) {
   return out;
 }
 
+export async function loadPostmanRaw(raw, source, nameHint, auth, mock = false, timeout = DEFAULT_TIMEOUT, retries = DEFAULT_RETRIES) {
+  const collection = JSON.parse(raw);
+  return _buildPostmanApi(collection, source, nameHint, auth, mock, timeout, retries);
+}
+
 export async function loadPostman(source, nameHint, auth, mock = false, timeout = DEFAULT_TIMEOUT, retries = DEFAULT_RETRIES) {
   let raw;
   if (!source.startsWith('http')) {
@@ -23,8 +28,11 @@ export async function loadPostman(source, nameHint, auth, mock = false, timeout 
     await assertSafeUrl(source);
     raw = await fetch(source).then(r => r.text());
   }
-
   const collection = JSON.parse(raw);
+  return _buildPostmanApi(collection, source, nameHint, auth, mock, timeout, retries);
+}
+
+async function _buildPostmanApi(collection, source, nameHint, auth, mock, timeout, retries) {
   const name = slugify(nameHint || collection.info?.name);
   const tools = [], handlers = new Map();
 

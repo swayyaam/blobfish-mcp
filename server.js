@@ -1,11 +1,23 @@
 #!/usr/bin/env node
 import './src/constants.js'; // ensures dotenv runs before anything else
 
+// --setup flag: configure Claude Desktop without cloning the repo
+// Usage: npx blobfish-mcp --setup
+if (process.argv.includes('--setup')) {
+  const { default: setup } = await import('./setup.js');
+  process.exit(0);
+}
+
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
 import fs from 'fs';
 import path from 'path';
+
+// HTTP/SSE transport (optional — loaded only when --http or --sse flag is passed)
+const useHttp = process.argv.includes('--http');
+const useSse  = process.argv.includes('--sse');
+const httpPort = parseInt(process.env.BLOBFISH_PORT ?? '3000');
 
 import { META_TOOLS } from './src/tools/meta.js';
 import { handleToolCall } from './src/tools/handlers.js';
@@ -37,7 +49,11 @@ async function loadBlobfishConfig(onlyNew = false) {
   try {
     const cfg = JSON.parse(fs.readFileSync(blobfishConfigPath, 'utf8'));
     if (!onlyNew) {
-      for (const wf of Object.entries(cfg.workflows || {})) savedWorkflows.set(wf[0], wf[1]);
+      for (const [wfName, wfDef] of Object.entries(cfg.workflows || {})) {
+        // Support both {steps:[...]} object and bare array
+        const steps = Array.isArray(wfDef) ? wfDef : wfDef.steps;
+        if (steps) savedWorkflows.set(wfName, { steps, description: wfDef.description || '' });
+      }
     }
     let changed = false;
     for (const entry of (cfg.apis || [])) {
@@ -71,5 +87,37 @@ for (const url of process.argv.slice(2)) await loadSpec(url);
 const { LOG_PATH } = await import('./src/constants.js');
 console.error(`[Blobfish] Ready — ${META_TOOLS.length} meta-tools${loadedApis.size ? `, ${getAllTools().length} API tools` : ''}${LOG_PATH ? ` | log → ${LOG_PATH}` : ''}`);
 
-const transport = new StdioServerTransport();
-await server.connect(transport);
+if (useHttp) {
+  // Streamable HTTP transport — MCP spec 2025-03-26+
+  const { StreamableHTTPServerTransport } = await import('@modelcontextprotocol/sdk/server/streamableHttp.js');
+  const { createServer } = await import('http');
+  const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
+  await server.connect(transport);
+  const httpServer = createServer(async (req, res) => {
+    try { await transport.handleRequest(req, res); }
+    catch (e) { res.writeHead(500); res.end(e.message); }
+  });
+  httpServer.listen(httpPort, () =>
+    console.error(`[Blobfish] HTTP transport listening on http://localhost:${httpPort}/mcp`)
+  );
+} else if (useSse) {
+  // SSE transport — compatible with older MCP clients
+  const { SSEServerTransport } = await import('@modelcontextprotocol/sdk/server/sse.js');
+  const { createServer } = await import('http');
+  const transport = new SSEServerTransport('/message', null);
+  const httpServer = createServer(async (req, res) => {
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+    if (req.method === 'OPTIONS') { res.writeHead(200); res.end(); return; }
+    try { await transport.handleRequest(req, res); }
+    catch (e) { res.writeHead(500); res.end(e.message); }
+  });
+  httpServer.listen(httpPort, async () => {
+    await server.connect(transport);
+    console.error(`[Blobfish] SSE transport listening on http://localhost:${httpPort}/sse`);
+  });
+} else {
+  // Default: stdio (Claude Desktop, Cursor, etc.)
+  const transport = new StdioServerTransport();
+  await server.connect(transport);
+}
