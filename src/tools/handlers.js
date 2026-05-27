@@ -103,8 +103,27 @@ export async function handleToolCall(req, { notifyToolsChanged }) {
       return { content: [{ type: 'text', text: JSON.stringify({ pages_fetched: pages, total_items: allItems.length, data: allItems }, null, 2) }] };
     }
 
+    if (name === 'save_workflow') {
+      const { name: wfName, steps, description } = args;
+      if (!wfName || !steps?.length) return { content: [{ type: 'text', text: 'Provide a name and at least one step.' }], isError: true };
+      savedWorkflows.set(wfName, { steps, description: description || '' });
+      return { content: [{ type: 'text', text: `Workflow "${wfName}" saved (${steps.length} steps). Run it with: run_workflow(name: "${wfName}")` }] };
+    }
+
+    if (name === 'list_workflows') {
+      if (savedWorkflows.size === 0) return { content: [{ type: 'text', text: 'No saved workflows. Use save_workflow to save one.' }] };
+      const lines = [...savedWorkflows.entries()].map(([n, wf]) => `• ${n} — ${wf.steps?.length ?? 0} steps${wf.description ? ` — ${wf.description}` : ''}`);
+      return { content: [{ type: 'text', text: lines.join('\n') }] };
+    }
+
     if (name === 'run_workflow') {
-      const { steps, input = {} } = args;
+      // Support running a saved workflow by name: run_workflow(name: "my-workflow", input: {...})
+      let { steps, name: wfName, input = {} } = args;
+      if (!steps && wfName) {
+        const saved = savedWorkflows.get(wfName);
+        if (!saved) return { content: [{ type: 'text', text: `No saved workflow named "${wfName}". Run list_workflows to see available ones.` }], isError: true };
+        steps = saved.steps;
+      }
       const results = {}, stepLog = [];
       for (let i = 0; i < steps.length; i++) {
         const step = steps[i];

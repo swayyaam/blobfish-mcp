@@ -62,11 +62,34 @@ export const META_TOOLS = [
     inputSchema: { type: 'object', properties: { tool_name: { type: 'string' }, args: { type: 'object', default: {} }, max_pages: { type: 'integer', default: 10 } }, required: ['tool_name'] },
   },
   {
-    name: 'run_workflow',
-    description: 'Run a multi-step workflow. Reference previous results with {{ steps.id.data.field }}. Supports foreach and run_if per step.',
+    name: 'save_workflow',
+    description: 'Save a workflow by name so it can be re-run later with run_workflow(name: "..."). Persists for the lifetime of this session.',
     inputSchema: {
       type: 'object',
       properties: {
+        name: { type: 'string', description: 'Unique name for this workflow' },
+        steps: {
+          type: 'array',
+          description: 'Workflow steps (same format as run_workflow)',
+          items: { type: 'object' },
+        },
+        description: { type: 'string', description: 'Optional description of what this workflow does' },
+      },
+      required: ['name', 'steps'],
+    },
+  },
+  {
+    name: 'list_workflows',
+    description: 'List all saved workflows and their step counts.',
+    inputSchema: { type: 'object', properties: {} },
+  },
+  {
+    name: 'run_workflow',
+    description: 'Run a multi-step workflow. Reference previous results with {{ steps.id.data.field }}. Supports foreach and run_if per step. Pass name to run a saved workflow.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        name: { type: 'string', description: 'Name of a saved workflow to run (from list_workflows). If provided, steps are optional.' },
         steps: {
           type: 'array',
           items: {
