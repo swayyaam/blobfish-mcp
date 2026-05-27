@@ -28,7 +28,7 @@ import { loadSpec } from './src/loaders/openapi.js';
 import { interpolateObj, slugify } from './src/utils.js';
 import { ROOT_DIR } from './src/constants.js';
 
-const server = new Server({ name: 'blobfish', version: '8.0.0' }, { capabilities: { tools: {} } });
+const server = new Server({ name: 'blobfish', version: '1.0.0' }, { capabilities: { tools: {} } });
 
 server.setRequestHandler(ListToolsRequestSchema, async () => ({
   tools: [...META_TOOLS, ...getAllTools()],
