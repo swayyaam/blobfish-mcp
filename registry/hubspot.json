@@ -1,0 +1,13 @@
+{
+  "name": "hubspot",
+  "title": "HubSpot CRM API",
+  "description": "Contacts, companies, deals, tickets, emails, and CRM pipelines.",
+  "spec_url": "https://api.hubspot.com/api-catalog-public/v1/apis/crm/v3/objects/contacts",
+  "spec_url": "https://raw.githubusercontent.com/HubSpot/HubSpot-public-api-spec-collection/main/PublicApiSpecs/CRM/Contacts/Rollouts/424/v3_contacts_contacts.json",
+  "include_tags": ["Basic", "Associations", "Search"],
+  "auth": {
+    "type": "bearer",
+    "key": "${HUBSPOT_ACCESS_TOKEN}"
+  },
+  "notes": "Requires HUBSPOT_ACCESS_TOKEN (private app token) from app.hubspot.com/private-apps. Each HubSpot object (contacts, deals, companies) has its own spec — this loads Contacts. Use load_api with other spec URLs for additional objects."
+}

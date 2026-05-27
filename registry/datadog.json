@@ -1,0 +1,14 @@
+{
+  "name": "datadog",
+  "title": "Datadog API",
+  "description": "Metrics, logs, monitors, dashboards, incidents, and infrastructure monitoring.",
+  "spec_url": "https://raw.githubusercontent.com/DataDog/datadog-api-client-go/master/api/datadogV1/api_dashboards.go",
+  "spec_url": "https://raw.githubusercontent.com/DataDog/datadog-api-client/main/packages/datadog-api-client-typescript/packages/datadog-api-client-v1/openapi.yaml",
+  "include_tags": ["Dashboards", "Monitors", "Metrics", "Logs", "Events"],
+  "auth": {
+    "type": "apikey",
+    "key": "${DATADOG_API_KEY}",
+    "header": "DD-API-KEY"
+  },
+  "notes": "Requires DATADOG_API_KEY and optionally DATADOG_APP_KEY from app.datadoghq.com/organization-settings/api-keys. Some endpoints need the DD-APPLICATION-KEY header too — set via set_api_auth."
+}

@@ -1,0 +1,13 @@
+{
+  "name": "pagerduty",
+  "title": "PagerDuty API",
+  "description": "Incidents, services, escalation policies, on-call schedules, and alerts.",
+  "spec_url": "https://raw.githubusercontent.com/PagerDuty/api-schema/main/reference/REST/openapiv3.json",
+  "include_tags": ["Incidents", "Services", "Schedules", "Users", "Alerts", "Escalation Policies"],
+  "auth": {
+    "type": "apikey",
+    "key": "${PAGERDUTY_API_KEY}",
+    "header": "Authorization"
+  },
+  "notes": "Requires PAGERDUTY_API_KEY (Token token=<key> format). Get it from your PagerDuty profile → API Access Keys. The Authorization header value should be 'Token token=YOUR_KEY' — set via set_api_auth if needed."
+}

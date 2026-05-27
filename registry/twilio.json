@@ -1,0 +1,13 @@
+{
+  "name": "twilio",
+  "title": "Twilio API",
+  "description": "SMS, voice calls, WhatsApp messages, and phone number management.",
+  "spec_url": "https://raw.githubusercontent.com/twilio/twilio-oai/main/spec/json/twilio_api_v2010.json",
+  "include_tags": ["Api20100401Message", "Api20100401Call", "Api20100401IncomingPhoneNumber"],
+  "auth": {
+    "type": "basic",
+    "username": "${TWILIO_ACCOUNT_SID}",
+    "password": "${TWILIO_AUTH_TOKEN}"
+  },
+  "notes": "Requires TWILIO_ACCOUNT_SID and TWILIO_AUTH_TOKEN from console.twilio.com. include_tags pre-set to keep tool count manageable."
+}

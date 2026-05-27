@@ -1,0 +1,13 @@
+{
+  "name": "jira",
+  "title": "Jira Cloud API",
+  "description": "Issues, projects, sprints, boards, comments, and workflows for Jira Cloud.",
+  "spec_url": "https://dac-static.atlassian.com/cloud/jira/platform/swagger-v3.v3.json",
+  "include_tags": ["Issues", "Projects", "Boards", "Sprints", "Comments", "Users"],
+  "auth": {
+    "type": "basic",
+    "username": "${JIRA_EMAIL}",
+    "password": "${JIRA_API_TOKEN}"
+  },
+  "notes": "Requires JIRA_EMAIL (your Atlassian email) and JIRA_API_TOKEN from id.atlassian.com/manage-profile/security/api-tokens. Also set base URL: the spec defaults to api.atlassian.com — your instance URL may differ."
+}

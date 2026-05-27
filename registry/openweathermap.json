@@ -1,0 +1,13 @@
+{
+  "name": "openweathermap",
+  "title": "OpenWeatherMap API",
+  "description": "Current weather, forecasts, air quality, and historical weather data. No auth for basic endpoints.",
+  "spec_url": "https://raw.githubusercontent.com/nickvdyck/openweathermap-openapi/main/openweathermap.yaml",
+  "include_tags": ["Current Weather Data", "5 Day Forecast"],
+  "auth": {
+    "type": "apikey",
+    "key": "${OPENWEATHERMAP_API_KEY}",
+    "header": "X-Api-Key"
+  },
+  "notes": "Free tier available at openweathermap.org/api. OPENWEATHERMAP_API_KEY is the appid param — free plan supports current weather and 5-day forecasts."
+}

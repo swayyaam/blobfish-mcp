@@ -1,0 +1,12 @@
+{
+  "name": "spotify",
+  "title": "Spotify Web API",
+  "description": "Search tracks, albums, artists, control playback, manage playlists and user library.",
+  "spec_url": "https://raw.githubusercontent.com/sonallux/spotify-web-api/main/official-spotify-open-api.yml",
+  "include_tags": ["Search", "Tracks", "Albums", "Artists", "Playlists", "Player", "Users"],
+  "auth": {
+    "type": "bearer",
+    "key": "${SPOTIFY_ACCESS_TOKEN}"
+  },
+  "notes": "Requires SPOTIFY_ACCESS_TOKEN — get a temporary one at developer.spotify.com/console or use OAuth. Token expires in 1h; refresh with set_api_auth when it does."
+}

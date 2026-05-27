@@ -1,0 +1,13 @@
+{
+  "name": "shopify",
+  "title": "Shopify Admin API",
+  "description": "Products, orders, customers, inventory, collections, and fulfillments.",
+  "spec_url": "https://raw.githubusercontent.com/shopify/openapi-parser/main/resources/shopify_openapi.json",
+  "include_tags": ["Product", "Order", "Customer", "Inventory", "Collection"],
+  "auth": {
+    "type": "apikey",
+    "key": "${SHOPIFY_ACCESS_TOKEN}",
+    "header": "X-Shopify-Access-Token"
+  },
+  "notes": "Requires SHOPIFY_ACCESS_TOKEN from your Shopify Partner app or admin API credentials. Your store subdomain (e.g. mystore.myshopify.com) must be set as the base URL — use load_api with the URL adjusted to your store."
+}

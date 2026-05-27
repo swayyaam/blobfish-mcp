@@ -1,0 +1,11 @@
+{
+  "name": "linear",
+  "title": "Linear API",
+  "description": "Issue tracking, project management, cycles, and roadmaps for engineering teams.",
+  "spec_url": "https://raw.githubusercontent.com/tklae/linear-openapi/main/linear-openapi.yaml",
+  "auth": {
+    "type": "bearer",
+    "key": "${LINEAR_API_KEY}"
+  },
+  "notes": "Requires LINEAR_API_KEY from linear.app/settings/api. Create a personal API key."
+}
