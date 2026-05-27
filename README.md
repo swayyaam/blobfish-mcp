@@ -1,6 +1,7 @@
 # Blobfish MCP
 
 [![npm version](https://img.shields.io/npm/v/blobfish-mcp)](https://www.npmjs.com/package/blobfish-mcp)
+[![CI](https://github.com/swayam-mishra/blobfish-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/swayam-mishra/blobfish-mcp/actions/workflows/ci.yml)
 [![license](https://img.shields.io/npm/l/blobfish-mcp)](LICENSE)
 [![node](https://img.shields.io/node/v/blobfish-mcp)](package.json)
 
@@ -26,6 +27,9 @@ Point it at an OpenAPI/Swagger URL or a Postman collection. Blobfish parses ever
 # Run directly without installing
 npx blobfish-mcp https://petstore.swagger.io/v2/swagger.json
 
+# Configure Claude Desktop (no clone needed)
+npx blobfish-mcp --setup
+
 # Or install globally
 npm install -g blobfish-mcp
 blobfish https://petstore.swagger.io/v2/swagger.json
@@ -37,9 +41,15 @@ Requires Node.js 18+.
 
 ## Connect to Claude Desktop
 
+The fastest way — no clone required:
+
 ```bash
-git clone https://github.com/swayam-mishra/blobfish-mcp
-cd blobfish-mcp
+npx blobfish-mcp --setup
+```
+
+Or if you've cloned the repo:
+
+```bash
 npm install
 npm run setup   # auto-detects config path and writes the entry
 ```
@@ -70,10 +80,20 @@ Add to your Claude Desktop config (`%APPDATA%\Claude\claude_desktop_config.json`
 
 Works with any MCP-compatible client:
 
-- **Claude Desktop** — primary target, setup via `npm run setup`
+- **Claude Desktop** — primary target, setup via `npx blobfish-mcp --setup`
 - **Cursor** — add to `.cursor/mcp.json` using the same config format
+- **Windsurf** — add to `~/.codeium/windsurf/mcp_config.json`
+- **Continue.dev** — add to `.continue/config.json` under `mcpServers`
+- **Cline / Roo Cline** — add via Cline's MCP settings panel
 - **Zed** — add to Zed's MCP settings
 - **Smithery** — one-click install via `smithery.yaml`
+
+For clients that use HTTP/SSE instead of stdio, start with:
+```bash
+blobfish --http   # Streamable HTTP on http://localhost:3000/mcp
+blobfish --sse    # SSE on http://localhost:3000/sse
+BLOBFISH_PORT=8080 blobfish --http   # custom port
+```
 
 ---
 
@@ -100,6 +120,49 @@ Blobfish starts with **15 meta-tools** Claude can always call:
 | `unload_api` | Remove a loaded API and all its tools |
 
 When Claude calls `load_api` or `discover_api`, Blobfish parses the spec and sends a `tools/list_changed` notification — new tools appear immediately.
+
+---
+
+## Workflows
+
+Chain multiple API calls into a single operation. Reference earlier step results with `{{ steps.id.field }}` template syntax.
+
+**Run inline:**
+```
+run_workflow(steps: [
+  { id: "user",  tool: "jph_get_users_id",       args: { id: "1" } },
+  { id: "posts", tool: "jph_get_posts",           args: { userId: "{{ steps.user.data.id }}" } },
+  { id: "first_comments", tool: "jph_get_posts_id_comments",
+    run_if: "{{ steps.posts.data.length }} != 0",
+    args:   { id: "{{ steps.posts.data.0.id }}" } }
+])
+```
+
+**Save and re-run:**
+```
+save_workflow(name: "user-posts", steps: [...])
+run_workflow(name: "user-posts", input: { userId: "42" })
+list_workflows()
+```
+
+**Pre-load from blobfish.json:**
+```json
+{
+  "workflows": {
+    "crypto-report": {
+      "description": "BTC/ETH prices + trending coins",
+      "steps": [
+        { "id": "price",    "tool": "coingecko_get_simple_price",    "args": { "ids": "{{ input.coins }}", "vs_currencies": "usd" } },
+        { "id": "trending", "tool": "coingecko_get_search_trending", "args": {} }
+      ]
+    }
+  }
+}
+```
+
+Per-step options: `foreach` (iterate over an array), `run_if` (conditional skip), `on_error: "continue"` (don't abort on failure).
+
+Ready-to-use examples are in the [`workflows/`](workflows/) folder.
 
 ---
 
@@ -180,6 +243,7 @@ Blobfish automatically detects and follows:
 | `BLOBFISH_TIMEOUT` | `30000` | Request timeout in ms |
 | `BLOBFISH_RETRIES` | `3` | Retry attempts on 5xx errors |
 | `BLOBFISH_LOG` | — | Log file path, or `true` for `./blobfish.log` |
+| `BLOBFISH_PORT` | `3000` | Port for `--http` / `--sse` transports |
 
 ---
 

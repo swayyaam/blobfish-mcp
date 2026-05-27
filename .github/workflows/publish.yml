@@ -21,6 +21,41 @@ jobs:
       - name: Install dependencies
         run: npm install
 
+      - name: Verify package.json version matches git tag
+        run: |
+          PKG=$(node -p "require('./package.json').version")
+          TAG=${GITHUB_REF_NAME#v}
+          if [ "$PKG" != "$TAG" ]; then
+            echo "Version mismatch: package.json=$PKG but git tag=$TAG"
+            echo "Update package.json version to $TAG before publishing."
+            exit 1
+          fi
+          echo "Version check passed: $PKG"
+
+      - name: Validate registry entries
+        run: |
+          node --input-type=module << 'EOF'
+          import fs from 'fs';
+          import path from 'path';
+          const dir = 'registry';
+          const files = fs.readdirSync(dir).filter(f => f.endsWith('.json'));
+          let errors = 0;
+          for (const f of files) {
+            const fpath = path.join(dir, f);
+            let entry;
+            try { entry = JSON.parse(fs.readFileSync(fpath, 'utf8')); }
+            catch (e) { console.error(`FAIL ${f}: invalid JSON — ${e.message}`); errors++; continue; }
+            if (!entry.spec_url) { console.error(`FAIL ${f}: missing required field "spec_url"`); errors++; }
+            if (!entry.name)     { console.error(`FAIL ${f}: missing required field "name"`); errors++; }
+            if (!entry.title)    { console.error(`FAIL ${f}: missing required field "title"`); errors++; }
+          }
+          if (errors > 0) { console.error(`\n${errors} registry error(s) found.`); process.exit(1); }
+          console.log(`Registry OK — ${files.length} entries validated.`);
+          EOF
+
+      - name: Run tests
+        run: npm test
+
       - name: Publish
         run: npm publish --access public
         env:

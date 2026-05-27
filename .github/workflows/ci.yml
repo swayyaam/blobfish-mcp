@@ -34,5 +34,24 @@ jobs:
       - name: Unit tests
         run: npm test
 
+      - name: Validate registry entries
+        run: |
+          node --input-type=module << 'EOF'
+          import fs from 'fs';
+          import path from 'path';
+          const dir = 'registry';
+          const files = fs.readdirSync(dir).filter(f => f.endsWith('.json'));
+          let errors = 0;
+          for (const f of files) {
+            let entry;
+            try { entry = JSON.parse(fs.readFileSync(path.join(dir, f), 'utf8')); }
+            catch (e) { console.error(`FAIL ${f}: ${e.message}`); errors++; continue; }
+            if (!entry.spec_url) { console.error(`FAIL ${f}: missing spec_url`); errors++; }
+            if (!entry.name)     { console.error(`FAIL ${f}: missing name`); errors++; }
+          }
+          if (errors) process.exit(1);
+          console.log(`Registry OK — ${files.length} entries`);
+          EOF
+
       - name: Startup test
         run: echo '{}' | timeout 10 node server.js 2>&1 | grep -q 'Ready' && echo 'PASS' || exit 1
