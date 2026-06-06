@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import './src/constants.js'; // ensures dotenv runs before anything else
+import './src/constants.js';
 
 // --setup flag: configure Claude Desktop without cloning the repo
 // Usage: npx blobfish-mcp --setup

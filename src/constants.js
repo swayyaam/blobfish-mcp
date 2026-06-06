@@ -1,5 +1,6 @@
-import { config } from 'dotenv';
-config(); // must run before any process.env reads
+// dotenv removed — use Node 20.6+ native .env loading:
+// node --env-file=.env server.js
+// (npx and Claude Desktop configs pass this flag automatically via setup.js)
 
 import path from 'path';
 import { fileURLToPath } from 'url';

@@ -21,6 +21,24 @@ Point it at an OpenAPI/Swagger URL or a Postman collection. Blobfish parses ever
 
 ---
 
+## What's new in 1.2.0
+
+**Auto-.env loading** — if a registry API's key is in your `.env`, it loads automatically at startup. No `blobfish.json`, no `load_api` call.
+
+```
+STRIPE_SECRET_KEY=sk-live-...   →  Stripe tools appear in Claude on startup
+GITHUB_TOKEN=ghp_...            →  GitHub tools appear in Claude on startup
+OPENAI_API_KEY=sk-...           →  OpenAI tools appear in Claude on startup
+```
+
+This works for all 21 pre-built registry entries. Set `BLOBFISH_AUTO_LOAD=false` to disable.
+
+**Tool annotations** — every generated tool now declares `readOnlyHint`, `destructiveHint`, and `idempotentHint` based on its HTTP method (GET = read-only, DELETE = destructive, etc.). Claude-compatible clients use these hints to decide when to confirm before calling.
+
+**Workflow condition operators** — `run_if` now supports `>`, `<`, `>=`, `<=` in addition to `==` and `!=`.
+
+---
+
 ## Install
 
 ```bash
@@ -99,15 +117,17 @@ BLOBFISH_PORT=8080 blobfish --http   # custom port
 
 ## How it works
 
-Blobfish starts with **15 meta-tools** Claude can always call:
+Blobfish starts with **17 meta-tools** Claude can always call:
 
 | Tool | Description |
 |------|-------------|
 | `list_registry` | List all pre-configured APIs — load any by name instantly |
-| `discover_api` | Auto-find a spec from just a domain — probes 15 common paths |
+| `discover_api` | Auto-find a spec from just a domain — probes 25 common paths |
 | `load_api` | Load by URL, registry name, or local file. Supports `include_tags`, `exclude_tags`, `shallow`, `mock` |
 | `set_api_auth` | Update credentials for a loaded API mid-conversation |
 | `fetch_all` | Auto-paginate any endpoint — Link headers, cursor, offset |
+| `save_workflow` | Save a workflow by name so it can be re-run with `run_workflow(name: "...")` |
+| `list_workflows` | List all saved workflows and their step counts |
 | `run_workflow` | Multi-step pipelines with `{{ template }}` syntax, `foreach`, and `run_if` |
 | `get_last_request_log` | See the exact URL/body of the last N requests — use when debugging 400 errors |
 | `rate_limit_status` | Show which APIs are rate-limited and when they reset |
@@ -201,6 +221,45 @@ Values like `"${MY_API_TOKEN}"` are interpolated from environment variables at s
 
 ---
 
+## Registry
+
+21 pre-built registry entries ship with blobfish-mcp — no spec URL or auth config required.
+
+**With auto-.env loading (1.2.0 default):** put the API key in your `.env` and the tools appear automatically.
+
+**Without auto-.env:** ask Claude to load by name:
+```
+load_api(spec_url: "stripe")
+load_api(spec_url: "github")
+```
+Or browse with `list_registry`.
+
+| Name | API | Required env var(s) |
+|------|-----|---------------------|
+| `anthropic` | Anthropic API | `ANTHROPIC_API_KEY` |
+| `coingecko` | CoinGecko API | *(none — public)* |
+| `datadog` | Datadog API | `DATADOG_API_KEY` |
+| `discord` | Discord API | `DISCORD_BOT_TOKEN` |
+| `github` | GitHub REST API | `GITHUB_TOKEN` |
+| `hubspot` | HubSpot CRM API | `HUBSPOT_ACCESS_TOKEN` |
+| `jira` | Jira Cloud API | `JIRA_EMAIL`, `JIRA_API_TOKEN` |
+| `linear` | Linear API | `LINEAR_API_KEY` |
+| `notion` | Notion API | `NOTION_TOKEN` |
+| `openai` | OpenAI API | `OPENAI_API_KEY` |
+| `openmeteo` | Open-Meteo Weather API | *(none — public)* |
+| `openweathermap` | OpenWeatherMap API | `OPENWEATHERMAP_API_KEY` |
+| `pagerduty` | PagerDuty API | `PAGERDUTY_API_KEY` |
+| `petstore` | Swagger Petstore | *(none — demo)* |
+| `resend` | Resend API | `RESEND_API_KEY` |
+| `shopify` | Shopify Admin API | `SHOPIFY_ACCESS_TOKEN` |
+| `slack` | Slack Web API | `SLACK_BOT_TOKEN` |
+| `spotify` | Spotify Web API | `SPOTIFY_ACCESS_TOKEN` |
+| `stripe` | Stripe API | `STRIPE_SECRET_KEY` |
+| `twilio` | Twilio API | `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN` |
+| `vercel` | Vercel API | `VERCEL_TOKEN` |
+
+---
+
 ## Authentication
 
 ### Per-API auth in blobfish.json or via `load_api`
@@ -240,10 +299,13 @@ Blobfish automatically detects and follows:
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `API_KEY` | — | Global Bearer token for all APIs |
+| `BLOBFISH_AUTO_LOAD` | `true` | Set to `false` to disable auto-loading registry APIs from `.env` |
 | `BLOBFISH_TIMEOUT` | `30000` | Request timeout in ms |
 | `BLOBFISH_RETRIES` | `3` | Retry attempts on 5xx errors |
+| `BLOBFISH_CACHE_TTL` | `60` | Response cache TTL in seconds |
 | `BLOBFISH_LOG` | — | Log file path, or `true` for `./blobfish.log` |
 | `BLOBFISH_PORT` | `3000` | Port for `--http` / `--sse` transports |
+| `BLOBFISH_ALLOW_LOCAL` | `false` | Set to `true` to allow loading local file specs (dev only) |
 
 ---
 
@@ -294,5 +356,5 @@ Responses are generated from the `example` fields in the OpenAPI spec.
 - [MCP SDK](https://github.com/modelcontextprotocol/typescript-sdk) — `@modelcontextprotocol/sdk`
 - [swagger-parser](https://github.com/APIDevTools/swagger-parser) — `@apidevtools/swagger-parser`
 - Node.js 18+ native `fetch`
-- [dotenv](https://github.com/motdotla/dotenv)
+- Node.js 20.6+ native `.env` loading (`--env-file`)
 

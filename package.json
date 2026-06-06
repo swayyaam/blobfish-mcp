@@ -20,7 +20,7 @@
     "blobfish.example.json"
   ],
   "scripts": {
-    "start": "node server.js",
+    "start": "node --env-file=.env server.js",
     "setup": "node setup.js",
     "test": "node --test test/basic.test.js"
   },
@@ -49,11 +49,10 @@
     "url": "https://github.com/swayam-mishra/blobfish-mcp/issues"
   },
   "engines": {
-    "node": ">=18.0.0"
+    "node": ">=20.6.0"
   },
   "dependencies": {
     "@apidevtools/swagger-parser": "^10.1.0",
-    "@modelcontextprotocol/sdk": "^1.0.0",
-    "dotenv": "^16.0.0"
+    "@modelcontextprotocol/sdk": "^1.0.0"
   }
 }

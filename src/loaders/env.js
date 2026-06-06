@@ -21,14 +21,15 @@ function extractEnvRefs(auth) {
 // Load registry entries whose auth env vars are all present in process.env.
 // Skips entries already loaded (e.g. via blobfish.json).
 // Returns the number of APIs auto-loaded.
-export async function autoEnvLoad() {
-  if (!fs.existsSync(REGISTRY_DIR)) return 0;
-  const files = fs.readdirSync(REGISTRY_DIR).filter(f => f.endsWith('.json'));
+// { loader, registryDir } are injectable for testing; defaults are the real implementations.
+export async function autoEnvLoad({ loader = autoLoad, registryDir = REGISTRY_DIR } = {}) {
+  if (!fs.existsSync(registryDir)) return 0;
+  const files = fs.readdirSync(registryDir).filter(f => f.endsWith('.json'));
   let loaded = 0;
 
   for (const file of files) {
     let entry;
-    try { entry = JSON.parse(fs.readFileSync(path.join(REGISTRY_DIR, file), 'utf8')); }
+    try { entry = JSON.parse(fs.readFileSync(path.join(registryDir, file), 'utf8')); }
     catch { continue; }
 
     const auth = entry.auth;
@@ -45,12 +46,12 @@ export async function autoEnvLoad() {
     if (loadedApis.has(expectedName)) continue;
 
     try {
-      await autoLoad(
+      await loader(
         entry.spec_url,
         entry.name,
         interpolateObj(auth),
-        false, // never mock auto-loaded APIs
-        undefined, // use defaults
+        false,
+        undefined,
         undefined,
         entry.include_tags || null,
         entry.exclude_tags || null,
