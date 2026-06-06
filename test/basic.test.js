@@ -89,6 +89,17 @@ test('evaluateCondition: inequality', () => {
   assert.equal(evaluateCondition('404 != 404'), false);
 });
 
+test('evaluateCondition: numeric comparisons', () => {
+  assert.equal(evaluateCondition('10 > 5'), true);
+  assert.equal(evaluateCondition('5 > 10'), false);
+  assert.equal(evaluateCondition('10 < 5'), false);
+  assert.equal(evaluateCondition('5 < 10'), true);
+  assert.equal(evaluateCondition('10 >= 10'), true);
+  assert.equal(evaluateCondition('9 >= 10'), false);
+  assert.equal(evaluateCondition('10 <= 10'), true);
+  assert.equal(evaluateCondition('11 <= 10'), false);
+});
+
 test('evaluateCondition: truthy/falsy strings', () => {
   assert.equal(evaluateCondition('true'), true);
   assert.equal(evaluateCondition('false'), false);

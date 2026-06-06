@@ -1,6 +1,6 @@
 # Roadmap
 
-Last updated: 2026-05-27
+Last updated: 2026-06-06
 
 ## North star
 
@@ -12,9 +12,8 @@ The developer doesn't configure anything. They don't know MCP exists.
 
 ## Current milestone
 
-1.2.0 — Zero Config
-Goal: if an API key is in your .env, Blobfish loads that API automatically at startup.
-Target: next session
+1.3.0 — OAuth
+Goal: unlock every enterprise API that needs OAuth 2.0 client_credentials.
 
 ---
 
@@ -36,27 +35,12 @@ Target: next session
 - Added version check + registry validation to publish.yml
 - Opted into Node.js 24 for GitHub Actions
 
-### 1.2.0 — Zero Config
-Theme: if the key is in .env, the API just works. No blobfish.json, no load_api call.
-
-Features:
-- Auto-load from .env: scan .env at startup, match known env var names to registry entries, load them silently
-  STRIPE_SECRET_KEY → stripe
-  GITHUB_TOKEN → github
-  NOTION_TOKEN → notion
-  OPENAI_API_KEY → openai
-  ANTHROPIC_API_KEY → anthropic
-  SLACK_BOT_TOKEN → slack
-  ... full mapping for all 21 registry entries
-- npm pkg fix (bin script name warning from publish)
-- Tool annotations: infer readOnly/destructive/idempotent from HTTP method, add to tool definitions
-- Fix evaluateCondition to support >, <, >=, <= (currently only == and !=)
-- Expand SPEC_PROBE_PATHS (add /swagger/v1/swagger.json, /api/openapi.yaml, etc.)
-
-Done when:
-  - [ ] User with STRIPE_SECRET_KEY in .env gets Stripe tools in Claude with zero other config
-  - [ ] npm publish produces no warnings
-  - [ ] run_if conditions work with numeric comparisons
+### 1.2.0 — Zero Config — SHIPPED (2026-06-06)
+- Auto-load from .env: scan registry at startup, load any entry whose auth env vars are all set (on by default, BLOBFISH_AUTO_LOAD=false to disable)
+- Tool annotations: readOnlyHint/destructiveHint/idempotentHint/openWorldHint inferred from HTTP method on all OpenAPI and Postman tools
+- Fix evaluateCondition: added >, <, >=, <= numeric comparison operators
+- Expand SPEC_PROBE_PATHS: added .yml variants, /.well-known/openapi.json, /spec/ paths
+- npm bin: added blobfish-mcp alias so npx blobfish-mcp works without publish warning
 
 ### 1.3.0 — Auth
 Theme: unlock every enterprise API that needs OAuth

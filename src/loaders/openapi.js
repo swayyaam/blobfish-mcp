@@ -9,6 +9,17 @@ import { makeUniqueName } from '../registry.js';
 import { withRetry, executeRequest } from '../http.js';
 import { DEFAULT_TIMEOUT, DEFAULT_RETRIES, MAX_TOOLS_PER_SPEC } from '../constants.js';
 
+function methodAnnotations(method) {
+  switch (method) {
+    case 'get':    return { readOnlyHint: true,  destructiveHint: false, idempotentHint: true,  openWorldHint: true };
+    case 'post':   return { readOnlyHint: false, destructiveHint: true,  idempotentHint: false, openWorldHint: true };
+    case 'put':    return { readOnlyHint: false, destructiveHint: true,  idempotentHint: true,  openWorldHint: true };
+    case 'patch':  return { readOnlyHint: false, destructiveHint: true,  idempotentHint: false, openWorldHint: true };
+    case 'delete': return { readOnlyHint: false, destructiveHint: true,  idempotentHint: true,  openWorldHint: true };
+    default:       return { openWorldHint: true };
+  }
+}
+
 export async function loadSpec(specUrl, nameHint, auth, mock = false, timeout = DEFAULT_TIMEOUT, retries = DEFAULT_RETRIES, includeTags = null, excludeTags = null, shallow = false) {
   const isLocal = !specUrl.startsWith('http://') && !specUrl.startsWith('https://');
   let resolved;
@@ -38,8 +49,9 @@ export async function loadSpec(specUrl, nameHint, auth, mock = false, timeout = 
       const toolName = makeUniqueName(toToolName(name, method, p));
       const schema = buildInputSchema(op, sharedParams, shallow);
       const desc = sanitizeDesc(op.summary || op.description || `${method.toUpperCase()} ${p}`);
+      const annotations = methodAnnotations(method);
 
-      tools.push({ name: toolName, description: desc, inputSchema: schema });
+      tools.push({ name: toolName, description: desc, inputSchema: schema, annotations });
       toolMeta.set(toolName, { method, apiName: name });
 
       handlers.set(toolName, mock

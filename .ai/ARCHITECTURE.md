@@ -1,6 +1,6 @@
 # Architecture
 
-Last updated: 2026-05-27
+Last updated: 2026-06-06
 
 ## System overview
 
@@ -27,6 +27,7 @@ Blobfish is a single Node.js process (ESM, no build step) that speaks the MCP pr
 | Postman loader | src/loaders/postman.js | Postman collection v2.1 → tools + handlers |
 | Probe | src/loaders/probe.js | Auto-discover spec URL from just a domain |
 | Registry loader | src/loaders/registry.js | Read registry/*.json, auth interpolation, unresolved var detection |
+| Env auto-loader | src/loaders/env.js | Scan registry at startup; load entries whose auth env vars are all present |
 | Meta tool defs | src/tools/meta.js | MCP inputSchema definitions for all 17 meta-tools |
 | Meta handlers | src/tools/handlers.js | Handler logic for every meta-tool + dynamic tool dispatch |
 
@@ -85,5 +86,4 @@ Auth values support ${ENV_VAR} interpolation. Unresolved vars throw a Claude-rea
 - No persistence: loadedApis lost on restart → fix in 1.4.0
 - No GraphQL support → 1.5.0
 - No OAuth token refresh → 1.3.0
-- No project-awareness (.env auto-load) → 1.2.0
 - responseCache has no proactive eviction / size cap → fix in 1.4.0

@@ -14,12 +14,22 @@ export function resolveArgs(val, context) {
   return val;
 }
 
-// Simple condition evaluator for run_if: "404 == 404", "true != false"
+// Simple condition evaluator for run_if: "404 == 200", "count >= 10", "true != false"
 export function evaluateCondition(expr) {
   const s = String(expr).trim();
-  const eq = s.match(/^(.+?)\s*==\s*(.+)$/);
-  if (eq) return String(eq[1].trim()) === String(eq[2].trim());
-  const ne = s.match(/^(.+?)\s*!=\s*(.+)$/);
-  if (ne) return String(ne[1].trim()) !== String(ne[2].trim());
+
+  // Order matters: check multi-char operators before single-char ones
+  for (const [pat, fn] of [
+    [/^(.+?)\s*>=\s*(.+)$/, (a, b) => Number(a) >= Number(b)],
+    [/^(.+?)\s*<=\s*(.+)$/, (a, b) => Number(a) <= Number(b)],
+    [/^(.+?)\s*!=\s*(.+)$/, (a, b) => String(a) !== String(b)],
+    [/^(.+?)\s*==\s*(.+)$/, (a, b) => String(a) === String(b)],
+    [/^(.+?)\s*>\s*(.+)$/,  (a, b) => Number(a) >  Number(b)],
+    [/^(.+?)\s*<\s*(.+)$/,  (a, b) => Number(a) <  Number(b)],
+  ]) {
+    const m = s.match(pat);
+    if (m) return fn(m[1].trim(), m[2].trim());
+  }
+
   return s !== '' && s !== 'false' && s !== '0' && s !== 'null' && s !== 'undefined';
 }

@@ -24,11 +24,12 @@ import { handleToolCall } from './src/tools/handlers.js';
 import { getAllTools } from './src/registry.js';
 import { loadedApis, savedWorkflows } from './src/state.js';
 import { autoLoad } from './src/loaders/auto.js';
+import { autoEnvLoad } from './src/loaders/env.js';
 import { loadSpec } from './src/loaders/openapi.js';
 import { interpolateObj, slugify } from './src/utils.js';
-import { ROOT_DIR } from './src/constants.js';
+import { ROOT_DIR, AUTO_LOAD } from './src/constants.js';
 
-const server = new Server({ name: 'blobfish', version: '1.0.0' }, { capabilities: { tools: {} } });
+const server = new Server({ name: 'blobfish', version: '1.2.0' }, { capabilities: { tools: {} } });
 
 server.setRequestHandler(ListToolsRequestSchema, async () => ({
   tools: [...META_TOOLS, ...getAllTools()],
@@ -72,6 +73,13 @@ async function loadBlobfishConfig(onlyNew = false) {
 }
 
 await loadBlobfishConfig();
+
+// Auto-load from .env: silently load registry APIs whose env vars are present.
+// On by default — disable with BLOBFISH_AUTO_LOAD=false.
+if (AUTO_LOAD) {
+  const n = await autoEnvLoad();
+  if (n > 0) await server.sendToolListChanged();
+}
 
 // #4: Hot-reload — watch blobfish.json for new entries
 if (fs.existsSync(blobfishConfigPath)) {

@@ -32,6 +32,17 @@ export async function loadPostman(source, nameHint, auth, mock = false, timeout 
   return _buildPostmanApi(collection, source, nameHint, auth, mock, timeout, retries);
 }
 
+function methodAnnotations(method) {
+  switch (method) {
+    case 'get':    return { readOnlyHint: true,  destructiveHint: false, idempotentHint: true,  openWorldHint: true };
+    case 'post':   return { readOnlyHint: false, destructiveHint: true,  idempotentHint: false, openWorldHint: true };
+    case 'put':    return { readOnlyHint: false, destructiveHint: true,  idempotentHint: true,  openWorldHint: true };
+    case 'patch':  return { readOnlyHint: false, destructiveHint: true,  idempotentHint: false, openWorldHint: true };
+    case 'delete': return { readOnlyHint: false, destructiveHint: true,  idempotentHint: true,  openWorldHint: true };
+    default:       return { openWorldHint: true };
+  }
+}
+
 async function _buildPostmanApi(collection, source, nameHint, auth, mock, timeout, retries) {
   const name = slugify(nameHint || collection.info?.name);
   const tools = [], handlers = new Map();
@@ -49,7 +60,8 @@ async function _buildPostmanApi(collection, source, nameHint, auth, mock, timeou
     for (const q of queryItems) { if (!q.disabled) properties[q.key] = { type: 'string', description: sanitizeDesc(q.description || q.key) }; }
     if (req.body?.raw) properties.body = { type: 'object', description: 'Request body' };
 
-    tools.push({ name: toolName, description: sanitizeDesc(item.name), inputSchema: { type: 'object', properties, ...(required.length ? { required } : {}) } });
+    const annotations = methodAnnotations(method);
+    tools.push({ name: toolName, description: sanitizeDesc(item.name), inputSchema: { type: 'object', properties, ...(required.length ? { required } : {}) }, annotations });
     toolMeta.set(toolName, { method, apiName: name });
 
     handlers.set(toolName, async (args) => {

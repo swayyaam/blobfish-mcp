@@ -1,11 +1,12 @@
 {
   "name": "blobfish-mcp",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "Any OpenAPI spec. Zero config. Claude-ready. MCP server that turns any REST API into Claude-callable tools instantly.",
   "type": "module",
   "main": "server.js",
   "bin": {
-    "blobfish": "./server.js"
+    "blobfish": "./server.js",
+    "blobfish-mcp": "./server.js"
   },
   "files": [
     "server.js",
