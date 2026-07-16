@@ -27,9 +27,10 @@ import { autoLoad } from './src/loaders/auto.js';
 import { autoEnvLoad } from './src/loaders/env.js';
 import { loadSpec } from './src/loaders/openapi.js';
 import { interpolateObj, slugify } from './src/utils.js';
-import { ROOT_DIR, AUTO_LOAD } from './src/constants.js';
+import { resolveConfigPath, selectAuth, parseArgs } from './src/config.js';
+import { ROOT_DIR, AUTO_LOAD, PROFILE } from './src/constants.js';
 
-const server = new Server({ name: 'blobfish', version: '1.2.0' }, { capabilities: { tools: {} } });
+const server = new Server({ name: 'blobfish', version: '1.3.0' }, { capabilities: { tools: {} } });
 
 server.setRequestHandler(ListToolsRequestSchema, async () => ({
   tools: [...META_TOOLS, ...getAllTools()],
@@ -43,7 +44,9 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
 
 // ── Startup ───────────────────────────────────────────────────────────────────
 
-const blobfishConfigPath = path.join(ROOT_DIR, 'blobfish.json');
+// --profile staging → blobfish.staging.json if present, else blobfish.json with auth_profiles.staging
+const blobfishConfigPath = resolveConfigPath(ROOT_DIR, PROFILE);
+if (PROFILE) console.error(`[Blobfish] Profile "${PROFILE}" — config: ${path.basename(blobfishConfigPath)}`);
 
 async function loadBlobfishConfig(onlyNew = false) {
   if (!fs.existsSync(blobfishConfigPath)) return;
@@ -60,7 +63,7 @@ async function loadBlobfishConfig(onlyNew = false) {
     for (const entry of (cfg.apis || [])) {
       const expectedName = slugify(entry.name);
       if (onlyNew && loadedApis.has(expectedName)) continue; // #4: skip already-loaded
-      await autoLoad(entry.url, entry.name, interpolateObj(entry.auth), entry.mock || false, entry.timeout ?? cfg.timeout, entry.retries ?? cfg.retries, entry.include_tags, entry.exclude_tags, entry.shallow);
+      await autoLoad(entry.url, entry.name, interpolateObj(selectAuth(entry, PROFILE)), entry.mock || false, entry.timeout ?? cfg.timeout, entry.retries ?? cfg.retries, entry.include_tags, entry.exclude_tags, entry.shallow);
       changed = true;
     }
     if (onlyNew && changed) {
@@ -90,7 +93,8 @@ if (fs.existsSync(blobfishConfigPath)) {
   });
 }
 
-for (const url of process.argv.slice(2)) await loadSpec(url);
+// Positional args are spec URLs — flags (--http, --sse, --profile <name>, …) are not
+for (const url of parseArgs(process.argv.slice(2)).positional) await loadSpec(url);
 
 const { LOG_PATH } = await import('./src/constants.js');
 console.error(`[Blobfish] Ready — ${META_TOOLS.length} meta-tools${loadedApis.size ? `, ${getAllTools().length} API tools` : ''}${LOG_PATH ? ` | log → ${LOG_PATH}` : ''}`);

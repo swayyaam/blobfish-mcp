@@ -6,6 +6,7 @@ export const toolMeta       = new Map(); // toolName → { method, apiName }
 export const responseCache  = new Map(); // cacheKey → { data, expiresAt }
 export const rateLimitState = new Map(); // apiName → { blockedUntil }
 export const savedWorkflows = new Map(); // name → workflow steps
+export const oauthTokens    = new Map(); // token_url|client_id|scope → { token, expiresAt, pending } (memory-only by design — see DECISIONS.md)
 
 export const cacheStats = { hits: 0, misses: 0 };
 export const requestLog = []; // ring buffer, max MAX_LOG_ENTRIES

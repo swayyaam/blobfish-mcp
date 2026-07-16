@@ -12,6 +12,10 @@ export const DEFAULT_RETRIES    = parseInt(process.env.BLOBFISH_RETRIES   ?? '3'
 export const DEFAULT_CACHE_TTL  = parseInt(process.env.BLOBFISH_CACHE_TTL ?? '60');
 export const ALLOW_LOCAL        = process.env.BLOBFISH_ALLOW_LOCAL === 'true';
 export const AUTO_LOAD          = process.env.BLOBFISH_AUTO_LOAD !== 'false'; // on by default
+
+// Environment profile: --profile staging (CLI wins) or BLOBFISH_PROFILE=staging
+const profileIdx = process.argv.indexOf('--profile');
+export const PROFILE = profileIdx !== -1 ? (process.argv[profileIdx + 1] ?? null) : (process.env.BLOBFISH_PROFILE || null);
 export const HTTP_PORT          = parseInt(process.env.BLOBFISH_PORT ?? '3000');
 export const MAX_SPEC_SIZE      = 10 * 1024 * 1024;
 export const MAX_RESP_SIZE      =  5 * 1024 * 1024;

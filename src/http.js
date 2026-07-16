@@ -1,5 +1,6 @@
 import { assertSafeUrl } from './security.js';
 import { buildAuthHeaders, logRequest, sleep } from './utils.js';
+import { getOAuthToken, invalidateOAuthToken } from './oauth.js';
 import { updateRateLimit } from './ratelimit.js';
 import { DEFAULT_TIMEOUT, DEFAULT_RETRIES, MAX_RESP_SIZE } from './constants.js';
 
@@ -20,9 +21,13 @@ export async function withRetry(fn, retries = DEFAULT_RETRIES, delay = 1000) {
   }
 }
 
-export async function executeRequest(baseUrl, method, pathTemplate, operation, args, auth, timeout = DEFAULT_TIMEOUT, apiName = null) {
+export async function executeRequest(baseUrl, method, pathTemplate, operation, args, auth, timeout = DEFAULT_TIMEOUT, apiName = null, _freshToken = false) {
   let url = baseUrl + pathTemplate;
-  const headers = buildAuthHeaders(auth);
+  // oauth2: exchange client credentials for a bearer token (cached + auto-refreshed in oauth.js)
+  const effectiveAuth = auth?.type === 'oauth2'
+    ? { type: 'bearer', key: await getOAuthToken(auth, { timeout }) }
+    : auth;
+  const headers = buildAuthHeaders(effectiveAuth);
   const queryParams = new URLSearchParams();
   for (const p of (operation.parameters || [])) {
     const val = args[p.name]; if (val == null) continue;
@@ -39,6 +44,11 @@ export async function executeRequest(baseUrl, method, pathTemplate, operation, a
   const ms = Date.now() - t0;
   const contentLength = parseInt(res.headers.get('content-length') || '0');
   if (contentLength > MAX_RESP_SIZE) throw new Error(`Response too large (${(contentLength / 1024 / 1024).toFixed(1)}MB, max ${MAX_RESP_SIZE / 1024 / 1024}MB)`);
+  // A 401 on a cached oauth2 token usually means it was revoked server-side — refetch once
+  if (res.status === 401 && auth?.type === 'oauth2' && !_freshToken) {
+    invalidateOAuthToken(auth);
+    return executeRequest(baseUrl, method, pathTemplate, operation, args, auth, timeout, apiName, true);
+  }
   const text = await res.text();
   if (text.length > MAX_RESP_SIZE) throw new Error(`Response body too large`);
   let data; try { data = JSON.parse(text); } catch { data = text; }

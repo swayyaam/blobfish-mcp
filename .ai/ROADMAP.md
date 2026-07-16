@@ -1,6 +1,6 @@
 # Roadmap
 
-Last updated: 2026-06-06
+Last updated: 2026-07-16
 
 ## North star
 
@@ -12,8 +12,8 @@ The developer doesn't configure anything. They don't know MCP exists.
 
 ## Current milestone
 
-1.3.0 — OAuth
-Goal: unlock every enterprise API that needs OAuth 2.0 client_credentials.
+1.3.0 — OAuth: code-complete on dev (2026-07-16), pending release.
+Next up: 1.4.0 — Resilience.
 
 ---
 
@@ -42,18 +42,20 @@ Goal: unlock every enterprise API that needs OAuth 2.0 client_credentials.
 - Expand SPEC_PROBE_PATHS: added .yml variants, /.well-known/openapi.json, /spec/ paths
 - npm bin: added blobfish-mcp alias so npx blobfish-mcp works without publish warning
 
-### 1.3.0 — Auth
+### 1.3.0 — Auth — CODE-COMPLETE (2026-07-16, pending release)
 Theme: unlock every enterprise API that needs OAuth
 
-Features:
-- OAuth 2.0 client_credentials flow (client_id + client_secret → auto-fetch bearer token)
-- Token auto-refresh before expiry
-- Per-API auth profiles in blobfish.json (staging vs production keys)
-- Environment profiles: --profile staging loads a different blobfish.json
+- OAuth 2.0 client_credentials flow: auth type "oauth2" with token_url/client_id/client_secret
+  (+ optional scope, audience, client_auth: body|basic) — src/oauth.js
+- Token auto-refresh 60s before expiry; single-flight; auto-retry once with fresh token on 401
+- Tokens memory-only (see DECISIONS.md), keyed token_url|client_id|scope
+- Per-API auth profiles: auth_profiles.<profile> on blobfish.json entries
+- Environment profiles: --profile staging / BLOBFISH_PROFILE → blobfish.staging.json if present
+- Fix: CLI flags no longer treated as positional spec URLs
 
 Done when:
-  - [ ] Salesforce, HubSpot, Google APIs work via client_credentials without manual token management
-  - [ ] Token refresh is invisible to Claude
+  - [ ] Salesforce, HubSpot, Google APIs work via client_credentials without manual token management (needs live credentials to verify)
+  - [x] Token refresh is invisible to Claude
 
 ### 1.4.0 — Resilience
 Theme: production-grade, survives restarts

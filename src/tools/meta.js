@@ -2,9 +2,15 @@ export const AUTH_SCHEMA = {
   type: 'object',
   description: 'Auth config for this API',
   properties: {
-    type: { type: 'string', enum: ['bearer', 'apikey', 'basic', 'none'] },
+    type: { type: 'string', enum: ['bearer', 'apikey', 'basic', 'oauth2', 'none'] },
     key: { type: 'string' }, header: { type: 'string' },
     username: { type: 'string' }, password: { type: 'string' },
+    token_url: { type: 'string', description: 'oauth2: token endpoint (client_credentials grant)' },
+    client_id: { type: 'string', description: 'oauth2: client ID' },
+    client_secret: { type: 'string', description: 'oauth2: client secret' },
+    scope: { type: 'string', description: 'oauth2: space-separated scopes (optional)' },
+    audience: { type: 'string', description: 'oauth2: audience parameter, required by some providers (optional)' },
+    client_auth: { type: 'string', enum: ['body', 'basic'], description: 'oauth2: how to send client credentials — form body (default) or HTTP Basic header' },
   },
 };
 

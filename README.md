@@ -21,7 +21,18 @@ Point it at an OpenAPI/Swagger URL or a Postman collection. Blobfish parses ever
 
 ---
 
-## What's new in 1.2.0
+## What's new in 1.3.0
+
+**OAuth 2.0 client_credentials** — APIs that need OAuth (Salesforce, HubSpot OAuth apps, Auth0-protected APIs, most enterprise gateways) now work with zero token management. Give Blobfish a `token_url`, `client_id`, and `client_secret`; it fetches the bearer token, caches it, refreshes it before expiry, and retries once on 401 — all invisible to Claude.
+
+```json
+{ "type": "oauth2", "token_url": "https://login.example.com/oauth/token", "client_id": "${MY_CLIENT_ID}", "client_secret": "${MY_CLIENT_SECRET}" }
+```
+
+**Environment profiles** — run `npx blobfish-mcp --profile staging` (or set `BLOBFISH_PROFILE=staging`) to load `blobfish.staging.json` if it exists, and to select `auth_profiles.staging` credentials on each API entry. Same APIs, different keys, one flag.
+
+<details>
+<summary>What was new in 1.2.0</summary>
 
 **Auto-.env loading** — if a registry API's key is in your `.env`, it loads automatically at startup. No `blobfish.json`, no `load_api` call.
 
@@ -36,6 +47,8 @@ This works for all 21 pre-built registry entries. Set `BLOBFISH_AUTO_LOAD=false`
 **Tool annotations** — every generated tool now declares `readOnlyHint`, `destructiveHint`, and `idempotentHint` based on its HTTP method (GET = read-only, DELETE = destructive, etc.). Claude-compatible clients use these hints to decide when to confirm before calling.
 
 **Workflow condition operators** — `run_if` now supports `>`, `<`, `>=`, `<=` in addition to `==` and `!=`.
+
+</details>
 
 ---
 
@@ -270,7 +283,36 @@ Or browse with `list_registry`.
 { "type": "apikey", "key": "abc123", "header": "X-Api-Key" }
 
 { "type": "basic", "username": "user", "password": "pass" }
+
+{ "type": "oauth2", "token_url": "https://login.example.com/oauth/token", "client_id": "...", "client_secret": "...", "scope": "read write" }
 ```
+
+### OAuth 2.0 (client_credentials)
+
+For `oauth2`, Blobfish exchanges your client credentials for a bearer token at `token_url`, caches it in memory, refreshes it 60 seconds before expiry, and retries once with a fresh token if the API returns 401. Optional fields:
+
+- `scope` — space-separated scopes
+- `audience` — required by some providers (e.g. Auth0)
+- `client_auth` — `"body"` (default, credentials in the form body) or `"basic"` (HTTP Basic header), matching whichever your provider expects
+
+Tokens never touch disk and are never logged.
+
+### Environment profiles
+
+Keep staging and production keys side by side with `auth_profiles` on any API entry:
+
+```json
+{
+  "url": "https://api.example.com/openapi.json",
+  "name": "myapi",
+  "auth": { "type": "bearer", "key": "${PROD_API_TOKEN}" },
+  "auth_profiles": {
+    "staging": { "type": "bearer", "key": "${STAGING_API_TOKEN}" }
+  }
+}
+```
+
+Then run with `--profile staging` (or `BLOBFISH_PROFILE=staging`). If a `blobfish.staging.json` file exists, it is loaded instead of `blobfish.json` entirely. Without a profile, `auth` is used as-is.
 
 ### Global fallback
 
@@ -305,6 +347,7 @@ Blobfish automatically detects and follows:
 | `BLOBFISH_CACHE_TTL` | `60` | Response cache TTL in seconds |
 | `BLOBFISH_LOG` | — | Log file path, or `true` for `./blobfish.log` |
 | `BLOBFISH_PORT` | `3000` | Port for `--http` / `--sse` transports |
+| `BLOBFISH_PROFILE` | — | Environment profile, same as `--profile` (e.g. `staging`) |
 | `BLOBFISH_ALLOW_LOCAL` | `false` | Set to `true` to allow loading local file specs (dev only) |
 
 ---

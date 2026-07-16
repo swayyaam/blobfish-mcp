@@ -25,6 +25,31 @@
       }
     },
     {
+      "url": "https://api.example.com/openapi.json",
+      "name": "myapi_oauth",
+      "auth": {
+        "type": "oauth2",
+        "token_url": "https://auth.example.com/oauth/token",
+        "client_id": "${MY_CLIENT_ID}",
+        "client_secret": "${MY_CLIENT_SECRET}",
+        "scope": "read write"
+      }
+    },
+    {
+      "url": "https://api.example.com/openapi.json",
+      "name": "myapi_profiles",
+      "auth": {
+        "type": "bearer",
+        "key": "${PROD_API_TOKEN}"
+      },
+      "auth_profiles": {
+        "staging": {
+          "type": "bearer",
+          "key": "${STAGING_API_TOKEN}"
+        }
+      }
+    },
+    {
       "url": "https://raw.githubusercontent.com/github/rest-api-description/main/descriptions/api.github.com/api.github.com.json",
       "name": "github",
       "include_tags": ["repos", "issues", "pulls"],

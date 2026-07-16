@@ -508,3 +508,157 @@ test('evaluateCondition handles null and undefined as falsy', () => {
   assert.equal(evaluateCondition('null'), false);
   assert.equal(evaluateCondition('undefined'), false);
 });
+
+// ── OAuth 2.0 client_credentials (1.3.0) ─────────────────────────────────────
+
+import { getOAuthToken, invalidateOAuthToken } from '../src/oauth.js';
+import { oauthTokens } from '../src/state.js';
+import { resolveConfigPath, selectAuth, parseArgs, assertValidProfile } from '../src/config.js';
+
+// Each test uses a unique token_url so the shared token cache never collides.
+let oauthTestId = 0;
+function makeOAuth(overrides = {}) {
+  return {
+    type: 'oauth2',
+    token_url: `https://auth.example.com/token/${++oauthTestId}`,
+    client_id: 'my-client',
+    client_secret: 'my-secret',
+    ...overrides,
+  };
+}
+
+function tokenResponse(body, { ok = true, status = 200 } = {}) {
+  return { ok, status, text: async () => JSON.stringify(body) };
+}
+
+test('getOAuthToken fetches a token and caches it', async () => {
+  const auth = makeOAuth();
+  let calls = 0;
+  const fetchFn = async () => { calls++; return tokenResponse({ access_token: 'tok_1', expires_in: 3600 }); };
+  assert.equal(await getOAuthToken(auth, { fetchFn }), 'tok_1');
+  assert.equal(await getOAuthToken(auth, { fetchFn }), 'tok_1');
+  assert.equal(calls, 1, 'second call should hit the cache');
+});
+
+test('getOAuthToken sends client credentials in the form body by default', async () => {
+  const auth = makeOAuth({ scope: 'read write' });
+  let captured;
+  const fetchFn = async (url, init) => { captured = { url, init }; return tokenResponse({ access_token: 'tok_2' }); };
+  await getOAuthToken(auth, { fetchFn });
+  const body = new URLSearchParams(captured.init.body);
+  assert.equal(captured.init.method, 'POST');
+  assert.equal(body.get('grant_type'), 'client_credentials');
+  assert.equal(body.get('client_id'), 'my-client');
+  assert.equal(body.get('client_secret'), 'my-secret');
+  assert.equal(body.get('scope'), 'read write');
+  assert.equal(captured.init.headers['Content-Type'], 'application/x-www-form-urlencoded');
+});
+
+test('getOAuthToken supports HTTP Basic client auth', async () => {
+  const auth = makeOAuth({ client_auth: 'basic' });
+  let captured;
+  const fetchFn = async (url, init) => { captured = init; return tokenResponse({ access_token: 'tok_3' }); };
+  await getOAuthToken(auth, { fetchFn });
+  const expected = 'Basic ' + Buffer.from('my-client:my-secret').toString('base64');
+  assert.equal(captured.headers['Authorization'], expected);
+  const body = new URLSearchParams(captured.body);
+  assert.equal(body.get('client_secret'), null, 'secret must not also be in the body');
+});
+
+test('getOAuthToken refreshes when the token is near expiry', async () => {
+  const auth = makeOAuth();
+  let calls = 0;
+  // expires_in 30s is inside the 60s refresh margin — every call refetches
+  const fetchFn = async () => { calls++; return tokenResponse({ access_token: `tok_${calls}`, expires_in: 30 }); };
+  assert.equal(await getOAuthToken(auth, { fetchFn }), 'tok_1');
+  assert.equal(await getOAuthToken(auth, { fetchFn }), 'tok_2');
+  assert.equal(calls, 2);
+});
+
+test('invalidateOAuthToken forces a refetch', async () => {
+  const auth = makeOAuth();
+  let calls = 0;
+  const fetchFn = async () => { calls++; return tokenResponse({ access_token: `tok_${calls}`, expires_in: 3600 }); };
+  await getOAuthToken(auth, { fetchFn });
+  invalidateOAuthToken(auth);
+  assert.equal(await getOAuthToken(auth, { fetchFn }), 'tok_2');
+});
+
+test('getOAuthToken single-flights concurrent requests', async () => {
+  const auth = makeOAuth();
+  let calls = 0;
+  const fetchFn = async () => {
+    calls++;
+    await new Promise(r => setTimeout(r, 20));
+    return tokenResponse({ access_token: 'tok_shared', expires_in: 3600 });
+  };
+  const [a, b] = await Promise.all([getOAuthToken(auth, { fetchFn }), getOAuthToken(auth, { fetchFn })]);
+  assert.equal(a, 'tok_shared');
+  assert.equal(b, 'tok_shared');
+  assert.equal(calls, 1, 'concurrent callers should share one token request');
+});
+
+test('getOAuthToken rejects config with missing fields and says how to fix it', async () => {
+  await assert.rejects(
+    () => getOAuthToken({ type: 'oauth2', token_url: 'https://auth.example.com/token' }),
+    /missing "client_id"[\s\S]*set_api_auth/
+  );
+});
+
+test('getOAuthToken surfaces token endpoint errors with the provider detail', async () => {
+  const auth = makeOAuth();
+  const fetchFn = async () => tokenResponse({ error: 'invalid_client', error_description: 'Client authentication failed' }, { ok: false, status: 401 });
+  await assert.rejects(() => getOAuthToken(auth, { fetchFn }), /Client authentication failed/);
+  assert.equal(oauthTokens.has(`${auth.token_url}|${auth.client_id}|`), false, 'failed fetch must not stay cached');
+});
+
+test('getOAuthToken blocks private token_url (SSRF)', async () => {
+  const auth = makeOAuth({ token_url: 'http://127.0.0.1/token' });
+  let calls = 0;
+  await assert.rejects(() => getOAuthToken(auth, { fetchFn: async () => { calls++; } }), /SSRF/);
+  assert.equal(calls, 0, 'fetch must never fire for a blocked URL');
+});
+
+// ── Environment profiles (1.3.0) ─────────────────────────────────────────────
+
+test('resolveConfigPath returns blobfish.json when no profile is set', () => {
+  assert.ok(resolveConfigPath('/app', null).endsWith('blobfish.json'));
+});
+
+test('resolveConfigPath prefers blobfish.<profile>.json when it exists', () => {
+  const p = resolveConfigPath('/app', 'staging', (f) => f.endsWith('blobfish.staging.json'));
+  assert.ok(p.endsWith('blobfish.staging.json'));
+});
+
+test('resolveConfigPath falls back to blobfish.json when the profile file is absent', () => {
+  const p = resolveConfigPath('/app', 'staging', () => false);
+  assert.ok(p.endsWith(path.sep + 'blobfish.json'));
+});
+
+test('assertValidProfile blocks path traversal in profile names', () => {
+  assert.throws(() => assertValidProfile('../evil'), /Invalid profile name/);
+  assert.throws(() => resolveConfigPath('/app', 'a/b', () => true), /Invalid profile name/);
+  assert.equal(assertValidProfile('staging-2'), 'staging-2');
+});
+
+test('selectAuth picks the active profile and falls back to auth', () => {
+  const entry = {
+    auth: { type: 'bearer', key: '${PROD_KEY}' },
+    auth_profiles: { staging: { type: 'bearer', key: '${STAGING_KEY}' } },
+  };
+  assert.equal(selectAuth(entry, 'staging').key, '${STAGING_KEY}');
+  assert.equal(selectAuth(entry, 'production').key, '${PROD_KEY}');
+  assert.equal(selectAuth(entry, null).key, '${PROD_KEY}');
+  assert.equal(selectAuth({}, 'staging'), undefined);
+});
+
+test('parseArgs separates flags from positional spec URLs', () => {
+  const { flags, positional } = parseArgs(['--http', '--profile', 'staging', 'https://x.dev/openapi.json']);
+  assert.equal(flags.http, true);
+  assert.equal(flags.profile, 'staging');
+  assert.deepEqual(positional, ['https://x.dev/openapi.json']);
+});
+
+test('parseArgs with no args yields empty flags and positional', () => {
+  assert.deepEqual(parseArgs([]), { flags: {}, positional: [] });
+});

@@ -1,11 +1,29 @@
 # Status
 
-Last updated: 2026-06-06
+Last updated: 2026-07-16
 
 ## Current milestone
 
 1.3.0 — OAuth
 Goal: unlock enterprise APIs (Salesforce, HubSpot, Google) that require OAuth 2.0 client_credentials.
+
+## In progress
+
+1.3.0 is code-complete on `dev`, pending review + release:
+
+- [x] OAuth 2.0 client_credentials flow (src/oauth.js) — client_id + client_secret → auto-fetch bearer token
+  - Tokens cached in memory per token_url|client_id|scope, single-flight on concurrent calls
+  - Supports scope, audience, and client_auth: "body" (default) or "basic"
+  - token_url goes through assertSafeUrl (SSRF), secrets never logged
+- [x] Token auto-refresh: refetch 60s before expiry; one automatic retry with a fresh token on 401
+- [x] Per-API auth profiles: `auth_profiles: { staging: {...} }` on blobfish.json entries (src/config.js selectAuth)
+- [x] Environment profiles: `--profile staging` / `BLOBFISH_PROFILE=staging` loads blobfish.staging.json if present, else blobfish.json with auth_profiles.staging selected
+- [x] Fixed: positional-arg loop no longer treats --http/--sse/--profile as spec URLs (src/config.js parseArgs)
+- [x] AUTH_SCHEMA extended with oauth2 fields; registry unresolved-auth error tailored for oauth2
+- [x] Version bumped to 1.3.0 (package.json + server.js)
+- [x] 16 new tests (91 total, all passing); docs updated (README, blobfish.example.json, .env.example)
+
+Not verified live (needs real credentials): Salesforce/HubSpot/Google end-to-end via client_credentials.
 
 ## Recently completed
 
@@ -15,26 +33,17 @@ Goal: unlock enterprise APIs (Salesforce, HubSpot, Google) that require OAuth 2.
   - evaluateCondition: added >, <, >=, <= numeric comparison operators
   - SPEC_PROBE_PATHS expanded (20 → 21 paths, added .yml variants, /.well-known/openapi.json, /spec/)
   - npm bin: added blobfish-mcp alias so npx blobfish-mcp works without warning
-  - Server version bumped to 1.2.0
 - 1.1.0 shipped to npm (2026-05-27)
-  - 13 improvements: version fix, savedWorkflows bug, Postman double-fetch, findDataArray priority
-  - New tools: save_workflow, list_workflows
-  - New flags: --setup, --http, --sse
-  - 10 new registry entries (21 total)
-  - CONTRIBUTING.md, CI hardening, Node 24 Actions
 
-## In progress
+## Up next (1.4.0 — Resilience)
 
-Nothing currently in progress.
-
-## Up next (1.3.0)
-
-- [ ] OAuth 2.0 client_credentials flow (client_id + client_secret → auto-fetch bearer token)
-- [ ] Token auto-refresh before expiry
-- [ ] Per-API auth profiles in blobfish.json (staging vs production keys)
-- [ ] Environment profiles: --profile staging loads a different blobfish.json
+- [ ] Persistent state: save/restore loadedApis + savedWorkflows to ~/.blobfish/state.json
+- [ ] responseCache proactive eviction + MAX_CACHE_SIZE cap with LRU
+- [ ] reload_config meta-tool
+- [ ] Rate limit queuing per-API
+- [ ] Response field filtering: load_api(response_fields: [...])
 
 ## Open questions (need Swayam's decision)
 
-- [ ] For 1.3.0 OAuth: should client_credentials tokens be stored in state.json (persistent) or memory-only?
-      Recommendation: memory-only for now, persistent in 1.4.0 alongside full state persistence.
+- [ ] Should 1.4.0 state persistence include oauthTokens? (1.3.0 keeps them memory-only per DECISIONS.md — a restart just refetches, which is cheap. Persisting tokens to disk is a security tradeoff.)
+- [ ] Growth roadmap (repo-root ROADMAP.md, untracked) suggests pulling progressive tool disclosure forward — decide before scoping 1.4.0 vs 1.5.0.

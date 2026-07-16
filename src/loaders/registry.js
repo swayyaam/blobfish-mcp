@@ -40,10 +40,13 @@ export function checkUnresolvedAuth(auth, apiName) {
     const match = val.match(/\$\{([^}]+)\}/);
     if (match) {
       const varName = match[1];
+      const example = auth.type === 'oauth2'
+        ? `set_api_auth("${apiName}", { "type": "oauth2", "token_url": "...", "client_id": "...", "client_secret": "..." })`
+        : `set_api_auth("${apiName}", { "type": "${auth.type || 'bearer'}", "key": "<their key>" })`;
       throw new Error(
         `"${apiName}" requires the ${varName} environment variable which is not set.\n\n` +
-        `To fix this: ask the user to provide their API key, then call:\n` +
-        `set_api_auth("${apiName}", { "type": "${auth.type || 'bearer'}", "key": "<their key>" })`
+        `To fix this: ask the user to provide their credentials, then call:\n` +
+        example
       );
     }
   }

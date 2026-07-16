@@ -1,6 +1,6 @@
 # Architecture
 
-Last updated: 2026-06-06
+Last updated: 2026-07-16
 
 ## System overview
 
@@ -15,7 +15,9 @@ Blobfish is a single Node.js process (ESM, no build step) that speaks the MCP pr
 | Constants | src/constants.js | All env vars, limits, probe paths |
 | State | src/state.js | Shared in-memory Maps (loadedApis, cache, rateLimitState, savedWorkflows, requestLog) |
 | Security | src/security.js | SSRF guard, path traversal, error sanitisation, URL scrubbing |
-| HTTP | src/http.js | executeRequest, withRetry, rate-limit aware |
+| HTTP | src/http.js | executeRequest, withRetry, rate-limit aware, oauth2 token resolution + 401 retry |
+| OAuth | src/oauth.js | client_credentials token fetch, memory cache, refresh 60s before expiry, single-flight |
+| Config | src/config.js | Profile-aware config path resolution, per-API auth_profiles selection, CLI arg parsing |
 | Cache | src/cache.js | TTL response cache, hit/miss stats |
 | Rate limiter | src/ratelimit.js | Parse x-ratelimit headers, block + wait |
 | Pagination | src/pagination.js | detectNextPage (Link header, cursor, offset), findDataArray with priority |
@@ -51,6 +53,7 @@ toolMeta: Map<toolName, { method, apiName }>
 responseCache: Map<cacheKey, { data, expiresAt }>
 rateLimitState: Map<apiName, { blockedUntil }>
 savedWorkflows: Map<name, { steps[], description }>
+oauthTokens: Map<token_url|client_id|scope, { token, expiresAt, pending }> (memory-only by decision — see DECISIONS.md)
 requestLog: Array (ring buffer, max 20)
 
 ## Tool naming
@@ -77,13 +80,12 @@ e.g. stripe_post_v1_charges
 
 registry/<name>.json
 Required: name, title, spec_url
-Optional: description, auth { type, key, header, username, password }, include_tags[], exclude_tags[], shallow, mock, notes
+Optional: description, auth { type, key, header, username, password, token_url, client_id, client_secret, scope, audience, client_auth }, include_tags[], exclude_tags[], shallow, mock, notes
 
 Auth values support ${ENV_VAR} interpolation. Unresolved vars throw a Claude-readable error with fix instructions.
 
 ## Known architectural gaps (planned fixes)
 
-- No persistence: loadedApis lost on restart → fix in 1.4.0
+- No persistence: loadedApis lost on restart → fix in 1.4.0 (includes oauthTokens if decided)
 - No GraphQL support → 1.5.0
-- No OAuth token refresh → 1.3.0
 - responseCache has no proactive eviction / size cap → fix in 1.4.0

@@ -1,6 +1,29 @@
 # Decisions
 
-Last updated: 2026-05-27
+Last updated: 2026-07-16
+
+---
+
+## 2026-07-16 — OAuth tokens: memory-only in 1.3.0
+
+Decision: client_credentials tokens live in an in-memory map (oauthTokens in src/state.js),
+keyed by token_url|client_id|scope. Not persisted to disk.
+Reason: this was the open question in STATUS.md; the recommendation there was memory-only now,
+revisit persistence in 1.4.0 alongside full state persistence. A restart just refetches the
+token — cheap — while writing bearer tokens to disk is a real security tradeoff.
+Also decided: refresh 60s before expiry, single-flight concurrent fetches, one automatic
+retry with a fresh token on 401 (matches the "self-healing auth" theme from 1.1.0).
+
+---
+
+## 2026-07-16 — Profiles: file-level and entry-level, file wins
+
+Decision: --profile staging (or BLOBFISH_PROFILE) does two things: load blobfish.staging.json
+INSTEAD of blobfish.json if it exists, and select auth_profiles.staging over auth on each entry.
+Profile names are validated to [a-zA-Z0-9_-] (they become part of a filename).
+Reason: two natural granularities — teams with fully different API sets per environment use a
+separate file; teams that differ only in keys use auth_profiles inline. Both should work, and
+"auth" remains the no-profile fallback so existing configs are untouched.
 
 A log of product and technical decisions made, with reasoning. Prevents relitigating the same questions.
 
