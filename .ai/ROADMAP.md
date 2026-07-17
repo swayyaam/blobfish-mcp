@@ -1,6 +1,6 @@
 # Roadmap
 
-Last updated: 2026-07-16
+Last updated: 2026-07-17
 
 ## North star
 
@@ -12,8 +12,8 @@ The developer doesn't configure anything. They don't know MCP exists.
 
 ## Current milestone
 
-1.3.0 — OAuth: code-complete on dev (2026-07-16), pending release.
-Next up: 1.4.0 — Resilience.
+1.4.0 — Resilience
+Goal: production-grade, survives restarts. (1.3.0 — OAuth shipped 2026-07-17.)
 
 ---
 
@@ -42,7 +42,7 @@ Next up: 1.4.0 — Resilience.
 - Expand SPEC_PROBE_PATHS: added .yml variants, /.well-known/openapi.json, /spec/ paths
 - npm bin: added blobfish-mcp alias so npx blobfish-mcp works without publish warning
 
-### 1.3.0 — Auth — CODE-COMPLETE (2026-07-16, pending release)
+### 1.3.0 — Auth — SHIPPED (2026-07-17)
 Theme: unlock every enterprise API that needs OAuth
 
 - OAuth 2.0 client_credentials flow: auth type "oauth2" with token_url/client_id/client_secret

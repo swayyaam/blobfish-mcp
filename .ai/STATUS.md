@@ -1,32 +1,25 @@
 # Status
 
-Last updated: 2026-07-16
+Last updated: 2026-07-17
 
 ## Current milestone
 
-1.3.0 — OAuth
-Goal: unlock enterprise APIs (Salesforce, HubSpot, Google) that require OAuth 2.0 client_credentials.
+1.4.0 — Resilience
+Goal: production-grade, survives restarts (persistent state, cache caps, rate limit queuing).
 
 ## In progress
 
-1.3.0 is code-complete on `dev`, pending review + release:
-
-- [x] OAuth 2.0 client_credentials flow (src/oauth.js) — client_id + client_secret → auto-fetch bearer token
-  - Tokens cached in memory per token_url|client_id|scope, single-flight on concurrent calls
-  - Supports scope, audience, and client_auth: "body" (default) or "basic"
-  - token_url goes through assertSafeUrl (SSRF), secrets never logged
-- [x] Token auto-refresh: refetch 60s before expiry; one automatic retry with a fresh token on 401
-- [x] Per-API auth profiles: `auth_profiles: { staging: {...} }` on blobfish.json entries (src/config.js selectAuth)
-- [x] Environment profiles: `--profile staging` / `BLOBFISH_PROFILE=staging` loads blobfish.staging.json if present, else blobfish.json with auth_profiles.staging selected
-- [x] Fixed: positional-arg loop no longer treats --http/--sse/--profile as spec URLs (src/config.js parseArgs)
-- [x] AUTH_SCHEMA extended with oauth2 fields; registry unresolved-auth error tailored for oauth2
-- [x] Version bumped to 1.3.0 (package.json + server.js)
-- [x] 16 new tests (91 total, all passing); docs updated (README, blobfish.example.json, .env.example)
-
-Not verified live (needs real credentials): Salesforce/HubSpot/Google end-to-end via client_credentials.
+Nothing currently in progress. 1.4.0 not yet started.
 
 ## Recently completed
 
+- 1.3.0 shipped to npm (2026-07-17) — OAuth
+  - OAuth 2.0 client_credentials flow (src/oauth.js): auth type "oauth2" with token_url/client_id/client_secret (+ scope, audience, client_auth body|basic)
+  - Tokens memory-only, keyed token_url|client_id|scope, single-flight; refreshed 60s before expiry; one auto-retry with fresh token on 401
+  - Environment profiles: --profile staging / BLOBFISH_PROFILE loads blobfish.staging.json if present, selects auth_profiles.staging on entries (src/config.js)
+  - Fix: CLI flags no longer treated as positional spec URLs
+  - 16 new tests (91 total); GitHub release: https://github.com/swayam-mishra/blobfish-mcp/releases/tag/v1.3.0
+  - Not verified live (needs real credentials): Salesforce/HubSpot/Google end-to-end via client_credentials
 - 1.2.0 shipped (2026-06-06) — Zero Config
   - Auto-.env loading: registry APIs whose env vars are present load silently at startup (on by default, BLOBFISH_AUTO_LOAD=false to disable)
   - Tool annotations: readOnlyHint/destructiveHint/idempotentHint/openWorldHint inferred from HTTP method
