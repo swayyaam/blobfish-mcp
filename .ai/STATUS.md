@@ -18,7 +18,7 @@ Nothing currently in progress. 1.4.0 not yet started.
   - Tokens memory-only, keyed token_url|client_id|scope, single-flight; refreshed 60s before expiry; one auto-retry with fresh token on 401
   - Environment profiles: --profile staging / BLOBFISH_PROFILE loads blobfish.staging.json if present, selects auth_profiles.staging on entries (src/config.js)
   - Fix: CLI flags no longer treated as positional spec URLs
-  - 16 new tests (91 total); GitHub release: https://github.com/swayam-mishra/blobfish-mcp/releases/tag/v1.3.0
+  - 16 new tests (91 total); GitHub release: https://github.com/swayyaam/blobfish-mcp/releases/tag/v1.3.0
   - Not verified live (needs real credentials): Salesforce/HubSpot/Google end-to-end via client_credentials
 - 1.2.0 shipped (2026-06-06) — Zero Config
   - Auto-.env loading: registry APIs whose env vars are present load silently at startup (on by default, BLOBFISH_AUTO_LOAD=false to disable)

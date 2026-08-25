@@ -1,7 +1,7 @@
 # Blobfish MCP
 
 [![npm version](https://img.shields.io/npm/v/blobfish-mcp)](https://www.npmjs.com/package/blobfish-mcp)
-[![CI](https://github.com/swayam-mishra/blobfish-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/swayam-mishra/blobfish-mcp/actions/workflows/ci.yml)
+[![CI](https://github.com/swayyaam/blobfish-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/swayyaam/blobfish-mcp/actions/workflows/ci.yml)
 [![license](https://img.shields.io/npm/l/blobfish-mcp)](LICENSE)
 [![node](https://img.shields.io/node/v/blobfish-mcp)](package.json)
 
@@ -17,7 +17,7 @@ Point it at an OpenAPI/Swagger URL or a Postman collection. Blobfish parses ever
 
 > *"I pointed it at a domain name. It found the spec itself, loaded 20 tools, and Claude was querying a live API in 10 seconds."*
 
-![Blobfish demo](https://raw.githubusercontent.com/swayam-mishra/blobfish-mcp/main/assets/demo.gif)
+![Blobfish demo](https://raw.githubusercontent.com/swayyaam/blobfish-mcp/main/assets/demo.gif)
 
 ---
 

@@ -40,13 +40,13 @@
   ],
   "author": "Swayam Mishra",
   "license": "MIT",
-  "homepage": "https://github.com/swayam-mishra/blobfish-mcp#readme",
+  "homepage": "https://github.com/swayyaam/blobfish-mcp#readme",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/swayam-mishra/blobfish-mcp.git"
+    "url": "git+https://github.com/swayyaam/blobfish-mcp.git"
   },
   "bugs": {
-    "url": "https://github.com/swayam-mishra/blobfish-mcp/issues"
+    "url": "https://github.com/swayyaam/blobfish-mcp/issues"
   },
   "engines": {
     "node": ">=20.6.0"

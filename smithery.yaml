@@ -1,6 +1,6 @@
 name: blobfish-mcp
 description: Any OpenAPI spec. Zero config. Claude-ready. MCP server that turns any REST API into Claude-callable tools instantly.
-homepage: https://github.com/swayam-mishra/blobfish-mcp
+homepage: https://github.com/swayyaam/blobfish-mcp
 license: MIT
 
 server:

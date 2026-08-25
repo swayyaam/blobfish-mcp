@@ -7,7 +7,7 @@ Thanks for wanting to help. Contributions of all sizes are welcome — from a ne
 ## Quickstart
 
 ```bash
-git clone https://github.com/swayam-mishra/blobfish-mcp
+git clone https://github.com/swayyaam/blobfish-mcp
 cd blobfish-mcp
 npm install
 npm test        # run the test suite
@@ -151,7 +151,7 @@ Tests use Node's built-in `node:test` runner. No Jest, no Mocha.
 
 ## Reporting bugs
 
-Open an issue at https://github.com/swayam-mishra/blobfish-mcp/issues.
+Open an issue at https://github.com/swayyaam/blobfish-mcp/issues.
 
 Include:
 - What you ran (`npx blobfish-mcp ...` or config JSON)
